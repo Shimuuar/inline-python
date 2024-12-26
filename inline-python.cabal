@@ -1,0 +1,45 @@
+Cabal-Version:  3.0
+Build-Type:     Simple
+
+Name:           inline-python
+Version:        0.1
+Synopsis:       Embedding python interpreter into haskell
+Description:
+  Embedding python interpreter
+
+  License:        BSD-3-Clause
+License-File:   LICENSE
+Author:         Aleksey Khudyakov <alexey.skladnoy@gmail.com>
+Maintainer:     Aleksey Khudyakov <alexey.skladnoy@gmail.com>
+Homepage:       https://github.com/Shimuuar/inline-python
+Bug-reports:    https://github.com/Shimuuar/inline-python/issues
+Category:       FFI
+extra-doc-files:
+  ChangeLog.md
+
+source-repository head
+  type:     git
+  location: http://github.com/Shimuuar/inline-python
+
+common language
+  Ghc-options:          -Wall -Wno-incomplete-uni-patterns
+  Default-Language:     GHC2021
+  Default-Extensions:
+    NoPolyKinds
+    --
+    DerivingVia
+    PatternSynonyms
+    ViewPatterns
+    --
+    NoFieldSelectors
+    DuplicateRecordFields
+    OverloadedRecordDot
+
+Library
+  import:         language
+  Build-Depends:  base      >=4.14 && <5
+                , primitive >=0.6.2
+                , vector    >=0.13.2
+  hs-source-dirs: src
+  Exposed-modules:
+    Python
