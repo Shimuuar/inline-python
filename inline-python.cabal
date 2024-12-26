@@ -40,8 +40,18 @@ Library
   Build-Depends:  base      >=4.14 && <5
                 , primitive >=0.6.2
                 , vector    >=0.13.2
+                , containers
                 , inline-c  >=0.9.1
   hs-source-dirs: src
-  pkgconfig-depends: python
+  pkgconfig-depends: python3
+  -- I hardcoded library name
+  extra-libraries:   python3.12
   Exposed-modules:
     Python
+
+Executable pyt
+  import: language
+  Build-Depends: base
+               , inline-python
+  hs-source-dirs: exe
+  Main-is:        tst.hs
