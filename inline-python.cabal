@@ -36,16 +36,20 @@ common language
     OverloadedRecordDot
 
 Library
-  import:         language
-  Build-Depends:  base      >=4.14 && <5
-                , primitive >=0.6.2
-                , vector    >=0.13.2
-                , containers
-                , inline-c  >=0.9.1
-  hs-source-dirs: src
+  import:            language
+  Build-Depends:     base      >=4.14 && <5
+                   , primitive >=0.6.2
+                   , vector    >=0.13.2
+                   , containers
+                   , transformers
+                   , inline-c  >=0.9.1
+  hs-source-dirs:    src
+  include-dirs:      include
+  -- FIXME: I think should use python-config instead of pkg-config. For now this
+  --        will do
   pkgconfig-depends: python3
-  -- I hardcoded library name
   extra-libraries:   python3.12
+  --
   Exposed-modules:
     Python
 
