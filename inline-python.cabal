@@ -30,6 +30,7 @@ common language
     DerivingVia
     PatternSynonyms
     ViewPatterns
+    LambdaCase
     --
     NoFieldSelectors
     DuplicateRecordFields
@@ -43,15 +44,18 @@ Library
                    , containers
                    , transformers
                    , inline-c  >=0.9.1
+                   , template-haskell
   hs-source-dirs:    src
   include-dirs:      include
+  c-sources:         cbits/python.c
   -- FIXME: I think should use python-config instead of pkg-config. For now this
   --        will do
   pkgconfig-depends: python3
-  extra-libraries:   python3.12
+  extra-libraries:   python3.12  
   --
   Exposed-modules:
     Python
+    Python.QQ
 
 Executable pyt
   import: language

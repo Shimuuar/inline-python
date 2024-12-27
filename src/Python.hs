@@ -14,14 +14,16 @@ import Data.Char
 import Data.Map.Strict qualified as Map
 import Foreign.Ptr
 import Foreign.Marshal
+import Foreign.Marshal.Alloc
+import Foreign.Storable
 import Foreign.C.String
 import Foreign.C.Types
 import System.Environment
 
 import Language.C.Inline         qualified as C
 import Language.C.Inline.Context qualified as C
-
-
+import Language.Haskell.TH.Quote
+import Language.Haskell.TH.Syntax qualified as TH
 
 pyCtx :: C.Context
 pyCtx = mempty { C.ctxTypesTable = Map.fromList tytabs } where
@@ -74,7 +76,7 @@ initializePython = do
       // Error case
       error:
       PyConfig_Clear(&cfg);
-      return 1;     
+      return 1;
       } |]
   case r of 0 -> pure ()
             _ -> error "Failed to initialize interpreter"
@@ -87,14 +89,76 @@ withPython :: IO a -> IO a
 withPython = bracket_ initializePython finalizePython
 
 
-py_Foo :: IO ()
-py_Foo =
-  [C.block| void {
-          PyRun_SimpleString("import sys\n"
-                             "print(sys.argv)\n");
-                             }
-                             |]
-    
- 
+----------------------------------------------------------------
+-- Objects
+----------------------------------------------------------------
+
+data PyError = PyError String
+  deriving stock (Show)
+
+instance Exception PyError
+
+pyEvalStr :: String -> IO ()
+pyEvalStr py = mask_ $ evalContT $ do
+  p_py  <- ContT $ withCString py
+  p_err <- ContT $ alloca @(Ptr CChar)
+  r <- liftIO
+    [C.block| int {
+       PyObject *e_type, *e_value, *e_trace;
+       // Compile code
+       PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_file_input);
+       if( code == 0 ){
+           PyErr_Fetch( &e_type, &e_value, &e_trace);
+           inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
+           return $(int py_err_compile);
+       }
+       // Execute in context of main
+       PyObject* main_module = PyImport_AddModule("__main__");
+       PyObject* globals     = PyModule_GetDict(main_module);
+       //
+       PyObject* r = PyEval_EvalCode(code, globals, globals);
+       Py_XDECREF(r);
+       if( PyErr_Occurred() ) {
+           PyErr_Fetch( &e_type, &e_value, &e_trace);
+           inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
+           return $(int py_err_eval);
+       }
+       return 0;
+       }|]
+  liftIO $ case r of
+    PY_OK          -> return ()
+    PY_ERR_COMPILE -> peek p_err >>= \case
+      p | nullPtr == p -> throwIO $ PyError "Compile error"
+        | otherwise    -> do
+            s <- peekCString p
+            throwIO $ PyError s
+    PY_ERR_EVAL -> peek p_err >>= \case
+      p | nullPtr == p -> throwIO $ PyError "Compile error"
+        | otherwise    -> do
+            s <- peekCString p
+            throwIO $ PyError s
+    _ -> error $ "pyEvalStr: unexpected error: " ++ show r
+  where
+    py_err_compile = PY_ERR_COMPILE
+    py_err_eval    = PY_ERR_EVAL
+
+unindent :: String -> String
+unindent py = case ls of
+  [] -> ""
+  _  -> unlines $ drop n <$> ls
+  where
+    n  = minimum [ length (takeWhile (==' ') s) | s <- ls ]
+    ls = filter (any (not . isSpace)) $ lines py
+
+pattern PY_OK, PY_ERR_COMPILE, PY_ERR_EVAL :: CInt
+pattern PY_OK          = 0
+pattern PY_ERR_COMPILE = 1
+pattern PY_ERR_EVAL    = 2
+
+
+----------------------------------------------------------------
+-- Utils
+----------------------------------------------------------------
+
 withWCtring :: String -> (Ptr CWchar -> IO a) -> IO a
 withWCtring = withArray0 (CWchar 0) . map (fromIntegral . ord)
