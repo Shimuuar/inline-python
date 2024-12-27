@@ -1,5 +1,6 @@
 {-# LANGUAGE CApiFFI                  #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE OverloadedStrings        #-}
 {-# LANGUAGE QuasiQuotes              #-}
 {-# LANGUAGE TemplateHaskell          #-}
 -- |
@@ -13,6 +14,8 @@ import Control.Monad.IO.Class
 import Data.Char
 import Data.Map.Strict qualified as Map
 import Foreign.Ptr
+import Foreign.ForeignPtr
+import GHC.ForeignPtr     (unsafeWithForeignPtr)
 import Foreign.Marshal
 import Foreign.Marshal.Alloc
 import Foreign.Storable
@@ -22,16 +25,16 @@ import System.Environment
 
 import Language.C.Inline         qualified as C
 import Language.C.Inline.Context qualified as C
+import Language.C.Types   qualified as C
+
 import Language.Haskell.TH.Quote
 import Language.Haskell.TH.Syntax qualified as TH
 
-pyCtx :: C.Context
-pyCtx = mempty { C.ctxTypesTable = Map.fromList tytabs } where
-  tytabs =
-      [ --(TypeName "SEXP", [t| SEXP0 |])
---      , (TypeName "Rcomplex", [t| Complex Double |])
-      ]
 
+import Python.Types
+import Python.Context
+
+C.context (C.baseCtx <> pyCtx)
 C.include "<inline-python.h>"
 
 ----------------------------------------------------------------
@@ -88,10 +91,33 @@ finalizePython = [C.exp| void { Py_Finalize(); } |]
 withPython :: IO a -> IO a
 withPython = bracket_ initializePython finalizePython
 
-
 ----------------------------------------------------------------
 -- Objects
 ----------------------------------------------------------------
+
+newPyObject :: Ptr PyObject -> IO PyObject
+newPyObject = fmap PyObject . newForeignPtr py_XDECREF
+
+foreign import capi "inline-python.h &inline_py_XDECREF" py_XDECREF :: FunPtr (Ptr PyObject -> IO ())
+
+
+pyObj2Int :: PyObject -> IO (Maybe Int)
+pyObj2Int (PyObject fp) = unsafeWithForeignPtr fp $ \p -> evalContT $ do
+  p_i <- ContT $ alloca @CLong
+  r   <- liftIO [C.block| int {
+    PyObject *o = $(PyObject* p);
+    if( PyLong_Check(o) ) {
+        *$(long* p_i) = PyLong_AsLong(o);
+        return 1;
+    }
+    return 0;
+    }|]
+  liftIO $ case r of
+    0 -> pure Nothing
+    1 -> Just . fromIntegral <$> peek p_i
+
+
+
 
 data PyError = PyError String
   deriving stock (Show)
@@ -141,6 +167,53 @@ pyEvalStr py = mask_ $ evalContT $ do
   where
     py_err_compile = PY_ERR_COMPILE
     py_err_eval    = PY_ERR_EVAL
+
+pyEvalStrE :: String -> IO PyObject
+pyEvalStrE py = mask_ $ evalContT $ do
+  p_py  <- ContT $ withCString py
+  p_err <- ContT $ alloca @(Ptr CChar)
+  p_res <- ContT $ alloca @(Ptr PyObject)
+  r <- liftIO
+    [C.block| int {
+       PyObject *e_type, *e_value, *e_trace;
+       // Compile code
+       PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_eval_input);
+       if( code == 0 ){
+           PyErr_Fetch( &e_type, &e_value, &e_trace);
+           inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
+           return $(int py_err_compile);
+       }
+       // Execute in context of main
+       PyObject* main_module = PyImport_AddModule("__main__");
+       PyObject* globals     = PyModule_GetDict(main_module);
+       //
+       PyObject* r = PyEval_EvalCode(code, globals, globals);
+       Py_INCREF(r);
+       *$(PyObject** p_res) = r;
+       if( PyErr_Occurred() ) {
+           PyErr_Fetch( &e_type, &e_value, &e_trace);
+           inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
+           return $(int py_err_eval);
+       }
+       return 0;
+       }|]
+  liftIO $ case r of
+    PY_OK          -> newPyObject =<< peek p_res
+    PY_ERR_COMPILE -> peek p_err >>= \case
+      p | nullPtr == p -> throwIO $ PyError "Compile error"
+        | otherwise    -> do
+            s <- peekCString p
+            throwIO $ PyError s
+    PY_ERR_EVAL -> peek p_err >>= \case
+      p | nullPtr == p -> throwIO $ PyError "Compile error"
+        | otherwise    -> do
+            s <- peekCString p
+            throwIO $ PyError s
+    _ -> error $ "pyEvalStr: unexpected error: " ++ show r
+  where
+    py_err_compile = PY_ERR_COMPILE
+    py_err_eval    = PY_ERR_EVAL
+
 
 unindent :: String -> String
 unindent py = case ls of

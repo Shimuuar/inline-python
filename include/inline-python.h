@@ -11,3 +11,5 @@ void inline_py_export_exception(
     PyObject *e_trace,
     char** p_msg
     );
+
+void inline_py_XDECREF(PyObject* o);

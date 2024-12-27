@@ -12,7 +12,5 @@ main = withPython $ do
      print(x+y,(x,y))
      |]
   --
-  [py|
-     print(x*y,(x,y))
-     |]
-  print("----")
+  r <- [pye|x * y|]
+  print =<< pyObj2Int r
