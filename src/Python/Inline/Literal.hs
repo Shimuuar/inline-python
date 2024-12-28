@@ -92,9 +92,22 @@ instance Literal CULLong where
       0 -> Just <$> peek p_out
       _ -> pure Nothing
 
+instance Literal CDouble where
+  basicToPy i =
+    [CU.exp| PyObject* { PyFloat_FromDouble($(double i)) } |]
+  basicFromPy p_py = evalContT $ do
+    p_out <- ContT $ alloca @CDouble
+    r     <- liftIO $ [CU.block| int {
+      * $(double* p_out) = PyFloat_AsDouble($(PyObject *p_py));
+      INLINE_PY_SIMPLE_ERROR_HANDLING();
+      } |]
+    liftIO $ case r of
+      0 -> Just <$> peek p_out
+      _ -> pure Nothing
 
 deriving via CLLong  instance Literal Int64
 deriving via CULLong instance Literal Word64
+deriving via CDouble instance Literal Double
 
 instance Literal Int where
   basicToPy   = basicToPy @Int64 . fromIntegral
