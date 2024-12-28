@@ -57,12 +57,15 @@ Library
   extra-libraries:   python3.12  
   --
   Exposed-modules:
-    Python
-    Python.QQ
+    Python.Inline.Literal
+    Python.Inline.QQ
+    Python.Inline
     Python.Types
-    Python.Literal
   Other-modules:
     Python.Internal.Types
+    Python.Internal.Init
+    Python.Internal.Util
+    Python.Internal.Eval
     Paths_inline_python
 
 Executable pyt

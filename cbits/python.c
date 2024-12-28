@@ -26,7 +26,3 @@ void inline_py_export_exception(
     strcpy(*p_msg, err_msg);
     return;
 }
-
-void inline_py_XDECREF(PyObject* o) {
-    Py_XDECREF(o);
-}

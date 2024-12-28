@@ -3,9 +3,8 @@
 -- {-# OPTIONS_GHC -ddump-splices #-}
 module Main where
 
-import Python
-import Python.QQ
-import Python.Literal
+import Python.Inline
+import Python.Inline.QQ
 
 main :: IO ()
 main = withPython $ do
