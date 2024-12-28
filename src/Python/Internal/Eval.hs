@@ -99,13 +99,13 @@ pyEvalExpr p_env src = evalContT $ do
        PyObject* globals     = PyModule_GetDict(main_module);
        //
        PyObject* r = PyEval_EvalCode(code, globals, $(PyObject* p_env));
-       Py_INCREF(r);
        *$(PyObject** p_res) = r;
        if( PyErr_Occurred() ) {
            PyErr_Fetch( &e_type, &e_value, &e_trace);
            inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
            return INLINE_PY_ERR_EVAL;
        }
+       Py_INCREF(r);
        return INLINE_PY_OK;
        }|]
   liftIO $ finiEval p_err r (newPyObject =<< peek p_res)
