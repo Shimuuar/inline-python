@@ -30,7 +30,7 @@ py = QuasiQuoter
 
 pye :: QuasiQuoter
 pye = QuasiQuoter
-  { quoteExp  = \txt -> [| pyEvalStrE $(expQQ "eval" (unindent txt)) |]
+  { quoteExp  = \txt -> [| pyEvalStrE =<< $(expQQ "eval" (unindent txt)) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"

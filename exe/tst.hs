@@ -1,4 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
+
+-- {-# OPTIONS_GHC -ddump-splices #-}
 module Main where
 
 import Python
@@ -13,5 +15,6 @@ main = withPython $ do
      print(x+y,(x,y))
      |]
   --
+  let z = 1000000 :: Int
   r <- [pye|x * y + z_hs|]
   print =<< fromPy @Int r

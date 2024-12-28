@@ -2,14 +2,22 @@
 {-# LANGUAGE TemplateHaskell #-}
 -- |
 -- Convert between haskell data types and python values
-module Python.Literal where
+module Python.Literal
+  ( Literal(..)
+  , toPy
+  , fromPy
+  , basicBindInDict
+  , basicNewDict
+  ) where
 
+import Control.Exception
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
 import Data.Int
 import Data.Word
 import Foreign.Ptr
 import Foreign.C.Types
+import Foreign.C.String
 import Foreign.Marshal.Alloc
 import Foreign.Storable
 
@@ -19,7 +27,7 @@ import Language.C.Types          qualified as C
 import Language.C.Inline.Unsafe  qualified as CU
 
 import Python.Types
-import Python.Context
+import Python.Internal.Types
 
 C.context (C.baseCtx <> pyCtx)
 C.include "<inline-python.h>"
@@ -34,7 +42,23 @@ fromPy :: Literal a => PyObject -> IO (Maybe a)
 fromPy py = unsafeWithPyObject py basicFromPy
 
 toPy :: Literal a => a -> IO PyObject
-toPy = undefined
+toPy a = mask_ $ newPyObject =<< basicToPy a
+
+
+basicBindInDict :: Literal a => Ptr PyObject -> String -> a -> IO ()
+basicBindInDict p_dict name a = evalContT $ do
+  -- FIXME: error handling
+  -- FIXME: meanining of errors in PyUnicode_DecodeUTF8?
+  (p_key,len) <- ContT $ withCStringLen name
+  p_obj       <- liftIO $ basicToPy a
+  let c_len = fromIntegral len :: CLong
+  liftIO [C.block| void {
+    PyObject* key = PyUnicode_DecodeUTF8( $(char* p_key), $(long c_len), 0);
+    PyDict_SetItem( $(PyObject* p_dict), key, $(PyObject* p_obj));
+    } |]
+
+basicNewDict :: IO (Ptr PyObject)
+basicNewDict = [C.exp| PyObject* { PyDict_New() } |]
 
 
 instance Literal CLong where

@@ -60,9 +60,9 @@ Library
     Python
     Python.QQ
     Python.Types
-    Python.Context
     Python.Literal
   Other-modules:
+    Python.Internal.Types
     Paths_inline_python
 
 Executable pyt

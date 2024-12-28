@@ -31,16 +31,18 @@ import Language.C.Types   qualified as C
 
 import Language.Haskell.TH.Quote
 import Language.Haskell.TH.Syntax qualified as TH
-
+import Language.Haskell.TH.Lib    qualified as TH
 
 import Python.Types
-import Python.Context
 import Python.Literal
+import Python.Internal.Types
 
 import Paths_inline_python
 
+----------------------------------------------------------------
 C.context (C.baseCtx <> pyCtx)
 C.include "<inline-python.h>"
+----------------------------------------------------------------
 
 ----------------------------------------------------------------
 -- Interpreter initialization
@@ -100,15 +102,6 @@ withPython = bracket_ initializePython finalizePython
 -- Objects
 ----------------------------------------------------------------
 
-newPyObject :: Ptr PyObject -> IO PyObject
-newPyObject = fmap PyObject . newForeignPtr py_XDECREF
-
-foreign import capi "inline-python.h &inline_py_XDECREF" py_XDECREF :: FunPtr (Ptr PyObject -> IO ())
-
-
-
-
-
 data PyError = PyError String
   deriving stock (Show)
 
@@ -158,9 +151,9 @@ pyEvalStr py = mask_ $ evalContT $ do
     py_err_compile = PY_ERR_COMPILE
     py_err_eval    = PY_ERR_EVAL
 
-pyEvalStrE :: String -> IO PyObject
-pyEvalStrE py = mask_ $ evalContT $ do
-  p_py  <- ContT $ withCString py
+pyEvalStrE :: (Ptr PyObject,String) -> IO PyObject
+pyEvalStrE (p_env, src) = mask_ $ evalContT $ do
+  p_py  <- ContT $ withCString src
   p_err <- ContT $ alloca @(Ptr CChar)
   p_res <- ContT $ alloca @(Ptr PyObject)
   r <- liftIO
@@ -177,7 +170,7 @@ pyEvalStrE py = mask_ $ evalContT $ do
        PyObject* main_module = PyImport_AddModule("__main__");
        PyObject* globals     = PyModule_GetDict(main_module);
        //
-       PyObject* r = PyEval_EvalCode(code, globals, globals);
+       PyObject* r = PyEval_EvalCode(code, globals, $(PyObject* p_env));
        Py_INCREF(r);
        *$(PyObject** p_res) = r;
        if( PyErr_Occurred() ) {
@@ -219,6 +212,13 @@ pattern PY_ERR_COMPILE = 1
 pattern PY_ERR_EVAL    = 2
 
 
+antiSuffix :: String
+antiSuffix = "_hs"
+
+-- | Chop antiquotation variable names to get the corresponding Haskell variable name.
+chop :: String -> String
+chop name = take (length name - length antiSuffix) name
+
 expQQ :: String -> String -> TH.Q TH.Exp
 expQQ mode src = do
   script <- liftIO $ getDataFileName "py/bound-vars.py"
@@ -227,9 +227,16 @@ expQQ mode src = do
     case code of
       ExitSuccess   -> pure $ words stdout
       ExitFailure{} -> error stderr
-  --  
-  error $ show antis
-  TH.lift src
+  let args = [ [| \p -> basicBindInDict p $(TH.lift nm) $(TH.dyn (chop nm)) |]
+             | nm <- antis
+             ]
+  --
+  [| do p_dict <- basicNewDict
+        mapM_ ($ p_dict) $(TH.listE args)
+        pure (p_dict, $(TH.lift src))
+   |]
+  -- error $ show antis
+  -- TH.lift src
 
 ----------------------------------------------------------------
 -- Utils
