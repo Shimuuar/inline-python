@@ -13,5 +13,5 @@ main = withPython $ do
      print(x+y,(x,y))
      |]
   --
-  r <- [pye|x * y|]
+  r <- [pye|x * y + z_hs|]
   print =<< fromPy @Int r

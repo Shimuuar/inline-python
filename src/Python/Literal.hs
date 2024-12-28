@@ -33,6 +33,9 @@ class Literal a where
 fromPy :: Literal a => PyObject -> IO (Maybe a)
 fromPy py = unsafeWithPyObject py basicFromPy
 
+toPy :: Literal a => a -> IO PyObject
+toPy = undefined
+
 
 instance Literal CLong where
   basicToPy i =

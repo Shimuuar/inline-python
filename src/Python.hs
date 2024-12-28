@@ -22,6 +22,8 @@ import Foreign.Storable
 import Foreign.C.String
 import Foreign.C.Types
 import System.Environment
+import System.Process
+import System.Exit
 
 import Language.C.Inline         qualified as C
 import Language.C.Inline.Context qualified as C
@@ -33,6 +35,9 @@ import Language.Haskell.TH.Syntax qualified as TH
 
 import Python.Types
 import Python.Context
+import Python.Literal
+
+import Paths_inline_python
 
 C.context (C.baseCtx <> pyCtx)
 C.include "<inline-python.h>"
@@ -213,6 +218,18 @@ pattern PY_OK          = 0
 pattern PY_ERR_COMPILE = 1
 pattern PY_ERR_EVAL    = 2
 
+
+expQQ :: String -> String -> TH.Q TH.Exp
+expQQ mode src = do
+  script <- liftIO $ getDataFileName "py/bound-vars.py"
+  antis  <- liftIO $ do
+    (code, stdout, stderr) <- readProcessWithExitCode "python" [script, mode] src
+    case code of
+      ExitSuccess   -> pure $ words stdout
+      ExitFailure{} -> error stderr
+  --  
+  error $ show antis
+  TH.lift src
 
 ----------------------------------------------------------------
 -- Utils

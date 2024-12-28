@@ -3,7 +3,10 @@
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE TemplateHaskell   #-}
 -- |
-module Python.Types where
+module Python.Types
+  ( PyObject(..)
+  , unsafeWithPyObject
+  ) where
 
 import Data.Coerce
 
@@ -17,7 +20,6 @@ import Language.Haskell.TH.Quote
 import GHC.ForeignPtr
 
 newtype PyObject = PyObject (ForeignPtr PyObject)
-
 
 unsafeWithPyObject :: forall a. PyObject -> (Ptr PyObject -> IO a) -> IO a
 unsafeWithPyObject = coerce (unsafeWithForeignPtr @PyObject @a)

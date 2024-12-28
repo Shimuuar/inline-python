@@ -16,6 +16,8 @@ Bug-reports:    https://github.com/Shimuuar/inline-python/issues
 Category:       FFI
 extra-doc-files:
   ChangeLog.md
+data-files:
+  py/bound-vars.py
 
 source-repository head
   type:     git
@@ -42,6 +44,7 @@ Library
                    , primitive >=0.6.2
                    , vector    >=0.13.2
                    , containers
+                   , process
                    , transformers
                    , inline-c  >=0.9.1
                    , template-haskell
@@ -59,6 +62,8 @@ Library
     Python.Types
     Python.Context
     Python.Literal
+  Other-modules:
+    Paths_inline_python
 
 Executable pyt
   import: language
