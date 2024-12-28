@@ -3,6 +3,7 @@ module Main where
 
 import Python
 import Python.QQ
+import Python.Literal
 
 main :: IO ()
 main = withPython $ do
@@ -13,4 +14,4 @@ main = withPython $ do
      |]
   --
   r <- [pye|x * y|]
-  print =<< pyObj2Int r
+  print =<< fromPy @Int r

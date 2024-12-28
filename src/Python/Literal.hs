@@ -27,8 +27,11 @@ C.include "<inline-python.h>"
 
 
 class Literal a where
-  basicToPy :: a -> IO (Ptr PyObject)
+  basicToPy   :: a -> IO (Ptr PyObject)
   basicFromPy :: Ptr PyObject -> IO (Maybe a)
+
+fromPy :: Literal a => PyObject -> IO (Maybe a)
+fromPy py = unsafeWithPyObject py basicFromPy
 
 
 instance Literal CLong where

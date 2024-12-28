@@ -101,21 +101,6 @@ newPyObject = fmap PyObject . newForeignPtr py_XDECREF
 foreign import capi "inline-python.h &inline_py_XDECREF" py_XDECREF :: FunPtr (Ptr PyObject -> IO ())
 
 
-pyObj2Int :: PyObject -> IO (Maybe Int)
-pyObj2Int (PyObject fp) = unsafeWithForeignPtr fp $ \p -> evalContT $ do
-  p_i <- ContT $ alloca @CLong
-  r   <- liftIO [C.block| int {
-    PyObject *o = $(PyObject* p);
-    if( PyLong_Check(o) ) {
-        *$(long* p_i) = PyLong_AsLong(o);
-        return 1;
-    }
-    return 0;
-    }|]
-  liftIO $ case r of
-    0 -> pure Nothing
-    1 -> Just . fromIntegral <$> peek p_i
-
 
 
 
