@@ -13,3 +13,16 @@ void inline_py_export_exception(
     );
 
 void inline_py_XDECREF(PyObject* o);
+
+
+
+// This macro checks for errors. If python exception is raised it
+// clear it and returns 1 otherwise retruns 0
+#define INLINE_PY_SIMPLE_ERROR_HANDLING() do {      \
+    if( PyErr_Occurred() ) {                        \
+          PyObject *e_type, *e_value, *e_trace;     \
+          PyErr_Fetch(&e_type, &e_value, &e_trace); \
+          return 1;                                 \
+    }                                               \
+    return 0;                                       \
+} while(0)

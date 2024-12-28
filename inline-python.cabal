@@ -58,6 +58,7 @@ Library
     Python.QQ
     Python.Types
     Python.Context
+    Python.Literal
 
 Executable pyt
   import: language
