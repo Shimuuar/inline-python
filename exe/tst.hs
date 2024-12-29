@@ -28,11 +28,11 @@ main = withPython $ do
   -- print =<< fromPy @Double r2
   let sin_ = pure @IO . sin @Double
       foo :: Int -> Int -> IO Int
-      foo a b = pure $ 1000*a+b
+      foo a b = pure $ a `div` b
   [py|
      try:
          print( sin__hs(1,3))
      except Exception as e:
          print("OOPS", e)
      |] `catch` (\(e::PyError) -> print ("OUCH",e))
-  [py| print(foo_hs(1,100)) |]  `catch` (\(e::PyError) -> print ("OUCH",e))
+  [py| print(foo_hs(1,0)) |]  `catch` (\(e::PyError) -> print ("OUCH",e))

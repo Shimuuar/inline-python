@@ -17,6 +17,7 @@ import Data.Int
 import Data.Word
 import Foreign.Ptr
 import Foreign.C.Types
+import Foreign.C.String
 import Foreign.Marshal.Alloc
 import Foreign.Storable
 
@@ -160,7 +161,7 @@ instance Literal Int where
 instance (Literal a, Literal b) => Literal (a -> IO b) where
   basicToPy f = do
     -- C function pointer for callback
-    f_ptr <- wrapO $ \_ p_a -> evalContT $ do
+    f_ptr <- wrapO $ \_ p_a -> runPY $ do
       a <- liftIO (basicFromPy p_a) >>= \case
         Nothing -> abort $ raiseUndecodedArg 1 1
         Just a  -> pure a
@@ -176,7 +177,7 @@ instance (Literal a, Literal b) => Literal (a -> IO b) where
 instance (Literal a1, Literal a2, Literal b) => Literal (a1 -> a2 -> IO b) where
   basicToPy f = do
     -- Create haskell function
-    f_ptr <- wrapFastcall $ \_ p_arr n -> evalContT $ do
+    f_ptr <- wrapFastcall $ \_ p_arr n -> runPY $ do
       when (n /= 2) $ abort $ raiseBadNArgs 2 n
       a <- liftIO (peekElemOff p_arr 0 >>= basicFromPy) >>= \case
         Nothing -> abort $ raiseUndecodedArg 1 2
@@ -217,6 +218,16 @@ raiseBadNArgs tot n = [CU.block| PyObject* {
   return NULL;
   } |]
 
+runPY :: ContT (Ptr PyObject) IO (Ptr PyObject) -> IO (Ptr PyObject)
+runPY io = evalContT io `catch` convertHaskellException
+
+convertHaskellException :: SomeException ->IO (Ptr PyObject)
+convertHaskellException err = do
+  withCString ("Haskell exception: "++show err) $ \p_err -> do
+    [CU.block| PyObject* {
+      PyErr_SetString(PyExc_RuntimeError, $(char *p_err));
+      return NULL;
+      } |]
 
 
 type FunWrapper a = a -> IO (FunPtr a)
