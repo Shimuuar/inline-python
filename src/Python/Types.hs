@@ -5,6 +5,7 @@
 -- |
 module Python.Types
   ( PyObject(..)
+  , PyError(..)
   , unsafeWithPyObject
   , newPyObject
   ) where

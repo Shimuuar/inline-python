@@ -4,6 +4,7 @@ module Python.Inline
   , finalizePython
   , withPython
   , PyObject
+  , PyError(..)
   , Literal(..)
   , toPy
   , fromPy
