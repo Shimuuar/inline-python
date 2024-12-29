@@ -27,6 +27,22 @@ void inline_py_export_exception(
     return;
 }
 
+PyObject *inline_py_function_wrapper(PyCFunction fun, int flags) {
+    PyMethodDef *meth = malloc(sizeof(PyMethodDef));
+    meth->ml_name  = "[inline_python]";
+    meth->ml_meth  = fun;
+    meth->ml_flags = flags;
+    meth->ml_doc   = "Wrapper constructed by inline-python";
+    // Python wrapper which carries PyMethodDef
+    PyObject* meth_obj = PyCapsule_New(meth, NULL, &inline_py_free_capsule);
+    if( PyErr_Occurred() )
+        return NULL;
+    // Python function
+    PyObject* f = PyCFunction_New(meth, meth_obj);
+    Py_DECREF(meth_obj);
+    return f;    
+}
+
 void inline_py_free_capsule(PyObject* py) {
     free(PyCapsule_GetPointer(py, NULL));
 }

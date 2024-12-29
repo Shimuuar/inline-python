@@ -32,7 +32,10 @@ C.include "<inline-python.h>"
 ----------------------------------------------------------------
 
 class Literal a where
+  -- | Convert haskell value to python object. It should generate new
+  --   object (except for immortals like None, True, etc).
   basicToPy   :: a -> IO (Ptr PyObject)
+  -- |
   basicFromPy :: Ptr PyObject -> IO (Maybe a)
 
 fromPy :: Literal a => PyObject -> IO (Maybe a)
@@ -143,60 +146,58 @@ instance Literal Int where
 
 
 
+-- NOTE: [Exceptions in callbacks]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- We absolutely must not allow unhandled haskell exceptions in
+-- callbacks from python. Else they will hit C wall and terminate
+-- program. They MUST be converted to python ones.
+--
+-- FIXME: figure out masking for python's call. I DON'T want get hit
+--        with async exception out of the blue
+
+
 instance (Literal a, Literal b) => Literal (a -> IO b) where
   basicToPy f = do
-    -- Create haskell function
+    -- C function pointer for callback
     f_ptr <- wrapO $ \_ p_a -> do
       ma <- basicFromPy p_a
       case ma of
-        Nothing -> throwIO $ PyError "Failed conversion"
+        Nothing -> do
+          [C.exp| void { PyErr_SetString(PyExc_RuntimeError, "Converiosn failed")} |]
+          return nullPtr  
         Just a  -> basicToPy =<< f a
     --
-    p_r  <- [C.block| PyObject* {
-      PyCFunction impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*));
-      // Create function definition
-      PyMethodDef *meth = malloc(sizeof(PyMethodDef));
-      meth->ml_name  = "[inline_python]";
-      meth->ml_meth  = impl;
-      meth->ml_flags = METH_O;
-      meth->ml_doc   = "Wrapper constructed by inline-python";
-      PyObject* meth_obj = PyCapsule_New(meth, NULL, &inline_py_free_capsule);
-      // Create function object and attach capsule to it
-      PyObject* f = PyCFunction_New(meth, meth_obj);
-      Py_DECREF(meth_obj);
-      return f;
+    [C.exp| PyObject* {
+      inline_py_function_wrapper(
+          $(PyObject* (*f_ptr)(PyObject*, PyObject*)),
+          METH_O)
       }|]
-    return p_r
   basicFromPy = error "IMPOSSIBLE!"
 
 instance (Literal a1, Literal a2, Literal b) => Literal (a1 -> a2 -> IO b) where
   basicToPy f = do
     -- Create haskell function
-    f_ptr <- wrapFastcall $ \_ p_arr n -> do
-      when (n /= 2) $ do
-        error "Bad number if args"
-      ma <- basicFromPy =<< peekElemOff p_arr 0
-      mb <- basicFromPy =<< peekElemOff p_arr 1
-      case ma of
-        Nothing -> throwIO $ PyError "Failed conversion"
-        Just a  -> case mb of
-          Nothing -> throwIO $ PyError "Failed conversion"
-          Just b  -> basicToPy =<< f a b
-    p_r  <- [C.block| PyObject* {
+    f_ptr <- wrapFastcall $ \_ p_arr -> \case
+      2 -> do
+        peekElemOff p_arr 0 >>= basicFromPy >>= \case
+          Nothing -> do
+            [C.exp| void { PyErr_SetString(PyExc_RuntimeError, "Conversion failed")} |]
+            return nullPtr
+          Just a -> peekElemOff p_arr 0 >>= basicFromPy >>= \case
+            Nothing -> do
+              [C.exp| void { PyErr_SetString(PyExc_RuntimeError, "Conversion failed")} |]
+              return nullPtr
+            Just b -> basicToPy =<< f a b
+      _ -> do
+        [C.exp| void { PyErr_SetString(PyExc_RuntimeError, "Expecting two arguments")} |]
+        return nullPtr
+    [C.block| PyObject* {
       _PyCFunctionFast impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*const*, int64_t));
-      // Create function definition
-      PyMethodDef *meth = malloc(sizeof(PyMethodDef));
-      meth->ml_name  = "[inline_python]";
-      meth->ml_meth  = (PyCFunction)impl;
-      meth->ml_flags = METH_FASTCALL;
-      meth->ml_doc   = "Wrapper constructed by inline-python";
-      PyObject* meth_obj = PyCapsule_New(meth, NULL, &inline_py_free_capsule);
-      // Create function object and attach capsule to it
-      PyObject* f = PyCFunction_New(meth, meth_obj);
-      Py_DECREF(meth_obj);
-      return f;
+      return inline_py_function_wrapper(
+          (PyCFunction)impl,
+          METH_FASTCALL);
       }|]
-    return p_r
   basicFromPy = error "IMPOSSIBLE!"
 
 

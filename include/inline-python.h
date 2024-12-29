@@ -27,5 +27,12 @@ void inline_py_export_exception(
     char** p_msg
     );
 
+// Allocate python function object which carrries its own PyMethodDef.
+// Returns function object or NULL with error raised.
+//
+// See NOTE: [Creation of python functions]
+PyObject *inline_py_function_wrapper(PyCFunction fun, int flags);
+
 // Free malloc'd buffer inside PyCapsule
 void inline_py_free_capsule(PyObject*);
+

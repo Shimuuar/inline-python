@@ -31,8 +31,8 @@ main = withPython $ do
       foo a b = pure $ 1000*a+b
   [py|
      try:
-         print( sin__hs(()))
-     except Exception() as e:
+         print( sin__hs(1,3))
+     except Exception as e:
          print("OOPS", e)
      |] `catch` (\(e::PyError) -> print ("OUCH",e))
-  [py| print(foo_hs(1,2)) |]
+  [py| print(foo_hs(1,2,3)) |]  `catch` (\(e::PyError) -> print ("OUCH",e))
