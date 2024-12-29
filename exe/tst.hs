@@ -35,4 +35,4 @@ main = withPython $ do
      except Exception as e:
          print("OOPS", e)
      |] `catch` (\(e::PyError) -> print ("OUCH",e))
-  [py| print(foo_hs(1,2,3)) |]  `catch` (\(e::PyError) -> print ("OUCH",e))
+  [py| print(foo_hs(1,100)) |]  `catch` (\(e::PyError) -> print ("OUCH",e))

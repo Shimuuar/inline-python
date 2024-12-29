@@ -160,13 +160,11 @@ instance Literal Int where
 instance (Literal a, Literal b) => Literal (a -> IO b) where
   basicToPy f = do
     -- C function pointer for callback
-    f_ptr <- wrapO $ \_ p_a -> do
-      ma <- basicFromPy p_a
-      case ma of
-        Nothing -> do
-          [C.exp| void { PyErr_SetString(PyExc_RuntimeError, "Converiosn failed")} |]
-          return nullPtr  
-        Just a  -> basicToPy =<< f a
+    f_ptr <- wrapO $ \_ p_a -> evalContT $ do
+      a <- liftIO (basicFromPy p_a) >>= \case
+        Nothing -> abort $ raiseUndecodedArg 1 1
+        Just a  -> pure a
+      liftIO $ basicToPy =<< f a
     --
     [C.exp| PyObject* {
       inline_py_function_wrapper(
@@ -178,20 +176,16 @@ instance (Literal a, Literal b) => Literal (a -> IO b) where
 instance (Literal a1, Literal a2, Literal b) => Literal (a1 -> a2 -> IO b) where
   basicToPy f = do
     -- Create haskell function
-    f_ptr <- wrapFastcall $ \_ p_arr -> \case
-      2 -> do
-        peekElemOff p_arr 0 >>= basicFromPy >>= \case
-          Nothing -> do
-            [C.exp| void { PyErr_SetString(PyExc_RuntimeError, "Conversion failed")} |]
-            return nullPtr
-          Just a -> peekElemOff p_arr 0 >>= basicFromPy >>= \case
-            Nothing -> do
-              [C.exp| void { PyErr_SetString(PyExc_RuntimeError, "Conversion failed")} |]
-              return nullPtr
-            Just b -> basicToPy =<< f a b
-      _ -> do
-        [C.exp| void { PyErr_SetString(PyExc_RuntimeError, "Expecting two arguments")} |]
-        return nullPtr
+    f_ptr <- wrapFastcall $ \_ p_arr n -> evalContT $ do
+      when (n /= 2) $ abort $ raiseBadNArgs 2 n
+      a <- liftIO (peekElemOff p_arr 0 >>= basicFromPy) >>= \case
+        Nothing -> abort $ raiseUndecodedArg 1 2
+        Just a  -> pure a
+      b <- liftIO (peekElemOff p_arr 1 >>= basicFromPy) >>= \case
+        Nothing -> abort $ raiseUndecodedArg 2 2
+        Just b  -> pure b
+      liftIO $ basicToPy =<< f a b
+    -- Create python function
     [C.block| PyObject* {
       _PyCFunctionFast impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*const*, int64_t));
       return inline_py_function_wrapper(
@@ -200,6 +194,28 @@ instance (Literal a1, Literal a2, Literal b) => Literal (a1 -> a2 -> IO b) where
       }|]
   basicFromPy = error "IMPOSSIBLE!"
 
+
+
+
+
+abort :: Monad m => m r -> ContT r m a
+abort m = ContT $ \_ -> m
+
+raiseUndecodedArg :: CInt -> CInt -> IO (Ptr PyObject)
+raiseUndecodedArg n tot = [CU.block| PyObject* {
+  char err[256];
+  sprintf(err, "Failed to decode function argument %i of %i", $(int n), $(int tot));
+  PyErr_SetString(PyExc_RuntimeError, err);
+  return NULL;
+  } |]
+
+raiseBadNArgs :: CInt -> Int64 -> IO (Ptr PyObject)
+raiseBadNArgs tot n = [CU.block| PyObject* {
+  char err[256];
+  sprintf(err, "Function takes exactly %i arguments (%li given)", $(int tot), $(int64_t n));
+  PyErr_SetString(PyExc_RuntimeError, err);
+  return NULL;
+  } |]
 
 
 
