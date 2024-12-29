@@ -14,5 +14,5 @@ def extract_hs_vars(code):
         if isinstance(node, ast.Name) and is_hs.match(node.id):
             yield node.id
 
-for nm in extract_hs_vars(code):
+for nm in set(extract_hs_vars(code)):
     print(nm)
