@@ -26,3 +26,7 @@ void inline_py_export_exception(
     strcpy(*p_msg, err_msg);
     return;
 }
+
+void inline_py_free_capsule(PyObject* py) {
+    free(PyCapsule_GetPointer(py, NULL));
+}

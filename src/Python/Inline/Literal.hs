@@ -1,5 +1,6 @@
-{-# LANGUAGE QuasiQuotes     #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE QuasiQuotes              #-}
+{-# LANGUAGE TemplateHaskell          #-}
 -- |
 -- Conversion between haskell data types and python values
 module Python.Inline.Literal
@@ -9,6 +10,7 @@ module Python.Inline.Literal
   ) where
 
 import Control.Exception
+import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
 import Data.Int
@@ -113,4 +115,75 @@ instance Literal Int where
   basicToPy   = basicToPy @Int64 . fromIntegral
   basicFromPy = (fmap . fmap) fromIntegral . basicFromPy @Int64
 
+
+----------------------------------------------------------------
+-- Functions marshalling
+----------------------------------------------------------------
+
+-- NOTE: [Creation of python functions]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- We need to call haskell from python we need to first to create
+-- FunPtr on haskell side and wrap it using python's C API. Process is
+-- unpleasantly convoluted.
+--
+-- Function marshalled from haskell side could only be called with
+-- using positional arguments. Two calling conventions are supported:
+--
+--  - METH_O        for 1-argument
+--  - METH_FASTCALL for 2+ argument functions
+--
+-- One problem is we need to keep PyMethodDef struct alive while
+-- function object is alive and GC it when function object is GC'd.
+-- To that end we use horrible hack.
+--
+-- PyMethodDef is allocated on C heap, wrapped into PyCapsule passed
+-- to CFunction as self. It does seems icky. However it does the trick.
+-- Maybe there's other way.
+
+instance (Show a, Literal a, Literal b) => Literal (a -> IO b) where
+  basicToPy f = do
+    -- Create haskell function
+    f_ptr <- wrapO $ \_ p_a -> do
+      ma <- basicFromPy p_a
+      basicToPy <=< f $ case ma of Just a  -> a
+                                   Nothing -> error "Failed conversion"
+    --
+    p_r  <- [C.block| PyObject* {
+      PyCFunction impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*));
+      // Create function definition
+      PyMethodDef *meth = malloc(sizeof(PyMethodDef));
+      meth->ml_name  = "[inline_python]";
+      meth->ml_meth  = impl;
+      meth->ml_flags = METH_O;
+      meth->ml_doc   = "Wrapper constructed by inline-python";
+      PyObject* meth_obj = PyCapsule_New(meth, NULL, &inline_py_free_capsule);
+      // Create function object and attach capsule to it
+      PyObject* f = PyCFunction_New(meth, meth_obj);
+      Py_DECREF(meth_obj);
+      return f;
+      }|]
+    return p_r
+  basicFromPy = error "IMPOSSIBLE!"
+
+
+wrap1 :: (Literal a, Literal b) => (a -> b) -> Ptr PyObject -> IO (Ptr PyObject)
+wrap1 f p_a = do
+  ma <- basicFromPy p_a
+  basicToPy $ f $ case ma of Just a  -> a
+                             Nothing -> error "Failed conversion"
+
+
+type FunWrapper a = a -> IO (FunPtr a)
+
+foreign import ccall "wrapper" wrapO
+  :: FunWrapper (Ptr PyObject -> Ptr PyObject -> IO (Ptr PyObject))
+
+foreign import ccall "wrapper" wrapFastcall
+  :: FunWrapper (Ptr PyObject -> Ptr (Ptr PyObject) -> Int64 -> IO (Ptr PyObject))
+
+
+-- foreign import ccall "wrapper" wrapFun2
+--   :: (Ptr PyObject -> Ptr PyObject -> IO (Ptr PyObject))
+--   -> IO (FunPtr (Ptr PyObject -> Ptr PyObject -> IO (Ptr PyObject)))
 

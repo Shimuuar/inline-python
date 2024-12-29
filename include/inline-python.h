@@ -26,3 +26,6 @@ void inline_py_export_exception(
     PyObject *e_trace,
     char** p_msg
     );
+
+// Free malloc'd buffer inside PyCapsule
+void inline_py_free_capsule(PyObject*);
