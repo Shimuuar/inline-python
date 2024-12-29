@@ -140,8 +140,10 @@ basicBindInDict p_dict name a = evalContT $ do
   p_obj       <- liftIO $ basicToPy a
   let c_len = fromIntegral len :: CLong
   liftIO [C.block| void {
-    PyObject* key = PyUnicode_DecodeUTF8( $(char* p_key), $(long c_len), 0);
-    PyDict_SetItem( $(PyObject* p_dict), key, $(PyObject* p_obj));
+    PyObject* p_obj = $(PyObject* p_obj);
+    PyObject* key   = PyUnicode_DecodeUTF8( $(char* p_key), $(long c_len), 0);
+    PyDict_SetItem($(PyObject* p_dict), key, p_obj);
+    Py_DECREF(p_obj);
     } |]
 
 basicNewDict :: IO (Ptr PyObject)
