@@ -3,6 +3,7 @@
 -- {-# OPTIONS_GHC -ddump-splices #-}
 module Main where
 
+import Control.Exception
 import Python.Inline
 import Python.Inline.QQ
 
@@ -12,7 +13,7 @@ main = withPython $ do
      x = 3
      y = 1000
      import math
-     import gc 
+     import gc
      import sys
      print(x+y,(x,y))
      |]
@@ -26,7 +27,12 @@ main = withPython $ do
   -- print =<< fromPy @Int    r2
   -- print =<< fromPy @Double r2
   let sin_ = pure @IO . sin @Double
+      foo :: Int -> Int -> IO Int
+      foo a b = pure $ 1000*a+b
   [py|
-     print( sin__hs(1.5))
-     del sin__hs
-     |]
+     try:
+         print( sin__hs(()))
+     except Exception() as e:
+         print("OOPS", e)
+     |] `catch` (\(e::PyError) -> print ("OUCH",e))
+  [py| print(foo_hs(1,2)) |]

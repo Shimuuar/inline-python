@@ -141,13 +141,16 @@ instance Literal Int where
 -- to CFunction as self. It does seems icky. However it does the trick.
 -- Maybe there's other way.
 
-instance (Show a, Literal a, Literal b) => Literal (a -> IO b) where
+
+
+instance (Literal a, Literal b) => Literal (a -> IO b) where
   basicToPy f = do
     -- Create haskell function
     f_ptr <- wrapO $ \_ p_a -> do
       ma <- basicFromPy p_a
-      basicToPy <=< f $ case ma of Just a  -> a
-                                   Nothing -> error "Failed conversion"
+      case ma of
+        Nothing -> throwIO $ PyError "Failed conversion"
+        Just a  -> basicToPy =<< f a
     --
     p_r  <- [C.block| PyObject* {
       PyCFunction impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*));
@@ -166,12 +169,37 @@ instance (Show a, Literal a, Literal b) => Literal (a -> IO b) where
     return p_r
   basicFromPy = error "IMPOSSIBLE!"
 
+instance (Literal a1, Literal a2, Literal b) => Literal (a1 -> a2 -> IO b) where
+  basicToPy f = do
+    -- Create haskell function
+    f_ptr <- wrapFastcall $ \_ p_arr n -> do
+      when (n /= 2) $ do
+        error "Bad number if args"
+      ma <- basicFromPy =<< peekElemOff p_arr 0
+      mb <- basicFromPy =<< peekElemOff p_arr 1
+      case ma of
+        Nothing -> throwIO $ PyError "Failed conversion"
+        Just a  -> case mb of
+          Nothing -> throwIO $ PyError "Failed conversion"
+          Just b  -> basicToPy =<< f a b
+    p_r  <- [C.block| PyObject* {
+      _PyCFunctionFast impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*const*, int64_t));
+      // Create function definition
+      PyMethodDef *meth = malloc(sizeof(PyMethodDef));
+      meth->ml_name  = "[inline_python]";
+      meth->ml_meth  = (PyCFunction)impl;
+      meth->ml_flags = METH_FASTCALL;
+      meth->ml_doc   = "Wrapper constructed by inline-python";
+      PyObject* meth_obj = PyCapsule_New(meth, NULL, &inline_py_free_capsule);
+      // Create function object and attach capsule to it
+      PyObject* f = PyCFunction_New(meth, meth_obj);
+      Py_DECREF(meth_obj);
+      return f;
+      }|]
+    return p_r
+  basicFromPy = error "IMPOSSIBLE!"
 
-wrap1 :: (Literal a, Literal b) => (a -> b) -> Ptr PyObject -> IO (Ptr PyObject)
-wrap1 f p_a = do
-  ma <- basicFromPy p_a
-  basicToPy $ f $ case ma of Just a  -> a
-                             Nothing -> error "Failed conversion"
+
 
 
 type FunWrapper a = a -> IO (FunPtr a)
@@ -181,9 +209,3 @@ foreign import ccall "wrapper" wrapO
 
 foreign import ccall "wrapper" wrapFastcall
   :: FunWrapper (Ptr PyObject -> Ptr (Ptr PyObject) -> Int64 -> IO (Ptr PyObject))
-
-
--- foreign import ccall "wrapper" wrapFun2
---   :: (Ptr PyObject -> Ptr PyObject -> IO (Ptr PyObject))
---   -> IO (FunPtr (Ptr PyObject -> Ptr PyObject -> IO (Ptr PyObject)))
-
