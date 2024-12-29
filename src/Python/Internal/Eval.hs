@@ -132,8 +132,8 @@ finiEval p_err r fini = case r of
             throwIO $ PyError s
   _ -> error $ "pyEvalStr: unexpected error: " ++ show r
 
-basicBindInDict :: Literal a => Ptr PyObject -> String -> a -> IO ()
-basicBindInDict p_dict name a = evalContT $ do
+basicBindInDict :: Literal a => String -> a -> Ptr PyObject -> IO ()
+basicBindInDict name a p_dict = evalContT $ do
   -- FIXME: error handling
   -- FIXME: meanining of errors in PyUnicode_DecodeUTF8?
   (p_key,len) <- ContT $ withCStringLen name
@@ -174,7 +174,7 @@ expQQ mode src = do
     case code of
       ExitSuccess   -> pure $ words stdout
       ExitFailure{} -> error stderr
-  let args = [ [| \p -> basicBindInDict p $(TH.lift nm) $(TH.dyn (chop nm)) |]
+  let args = [ [| basicBindInDict $(TH.lift nm) $(TH.dyn (chop nm)) |]
              | nm <- antis
              ]
   --
