@@ -1,10 +1,15 @@
-{-# LANGUAGE QuasiQuotes     #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE QuasiQuotes               #-}
+{-# LANGUAGE TemplateHaskell           #-}
 -- |
 -- Evaluation of python expressions
 module Python.Internal.Eval
-  ( -- * Evaluators and QQ
-    pyEvalInMain
+  ( -- * Evaluator
+    PyEvalReq(..)
+  , toPythonThread
+  , pythonInterpreter
+    -- * Evaluators and QQ
+  , pyEvalInMain
   , pyEvalExpr
   , expQQ
   , basicNewDict
@@ -14,6 +19,7 @@ module Python.Internal.Eval
   , unindent
   ) where
 
+import Control.Concurrent
 import Control.Exception
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
@@ -25,6 +31,7 @@ import Foreign.Ptr
 import Foreign.Storable
 import System.Exit
 import System.Process (readProcessWithExitCode)
+import System.IO.Unsafe
 
 import Language.C.Inline          qualified as C
 import Language.Haskell.TH.Lib    qualified as TH
@@ -39,6 +46,43 @@ import Paths_inline_python (getDataFileName)
 C.context (C.baseCtx <> pyCtx)
 C.include "<inline-python.h>"
 ----------------------------------------------------------------
+
+-- NOTE: [Python evaluation]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- Interaction with python interpreter and haskell's threading drives
+-- important design decisions:
+--
+--  1. Python is essentially single threaded. Before any interaction
+--     with interpreter one must acquire GIL.
+--
+--  2. PyGILState_{Ensure,Release} use thread local state.
+--
+-- And here we run into problem. Haskell's runtime migrates green
+-- threads freely between OS threads. We can't use that API! Still we
+-- want to be able to evaluate python expressions in normal IO monad.
+--
+-- So only solution is create separate bound thread and use MVars to
+-- send data between threads.
+
+
+-- | Evaluation request sent to
+data PyEvalReq = forall a. PyEvalReq (Py a) (MVar a)
+
+-- | Python evaluator reads messages from this MVar
+toPythonThread :: MVar PyEvalReq
+toPythonThread = unsafePerformIO newEmptyMVar
+{-# NOINLINE toPythonThread #-}
+
+-- | ThreadId of thread running python's interpreter
+pythonInterpreter :: MVar ThreadId
+pythonInterpreter = unsafePerformIO newEmptyMVar
+{-# NOINLINE pythonInterpreter #-}
+
+
+
+
+
 
 ----------------------------------------------------------------
 -- Evaluators
@@ -72,12 +116,12 @@ pyEvalInMain p_env src = evalContT $ do
         return INLINE_PY_ERR_EVAL;
     }
     return INLINE_PY_OK;
-    } |]                        
+    } |]
   liftIO $ finiEval p_err r (pure ())
 
 -- | Evaluate expression with fresh local environment
 pyEvalExpr
-  :: Ptr PyObject -- ^ Dictionary with local 
+  :: Ptr PyObject -- ^ Dictionary with local
   -> String       -- ^ Python source code
   -> IO PyObject
 pyEvalExpr p_env src = evalContT $ do
@@ -110,8 +154,8 @@ pyEvalExpr p_env src = evalContT $ do
        }|]
   liftIO $ finiEval p_err r (newPyObject =<< peek p_res)
 
--- | Convert evaluation result and 
-finiEval 
+-- | Convert evaluation result and
+finiEval
   :: Ptr CString
   -> CInt
   -> IO a
@@ -178,7 +222,7 @@ expQQ mode src = do
              | nm <- antis
              ]
   --
-  [| \p_dict -> do 
+  [| \p_dict -> do
         mapM_ ($ p_dict) $(TH.listE args)
         pure $(TH.lift src)
    |]

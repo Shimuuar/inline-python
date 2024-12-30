@@ -6,8 +6,11 @@
 -- separate module since some are required for @inline-c@'s context
 -- and we need context for
 module Python.Internal.Types
-  ( PyObject(..)
+  ( -- * Data type
+    PyObject(..)
   , PyError(..)
+  , Py
+    -- * inline-C
   , pyCtx
     -- * Patterns
   , pattern INLINE_PY_OK
@@ -16,6 +19,7 @@ module Python.Internal.Types
   ) where
 
 import Control.Exception
+import Control.Monad.IO.Class
 import Data.Map.Strict           qualified as Map
 import Foreign.ForeignPtr
 import Foreign.C.Types
@@ -23,15 +27,34 @@ import Language.C.Types
 import Language.C.Inline.Context
 
 
+----------------------------------------------------------------
+-- Primitives
+----------------------------------------------------------------
+
 -- | Some python object. Since almost everything in python is mutable
 --   it could only be accessed only in IO monad.
 newtype PyObject = PyObject (ForeignPtr PyObject)
 
-
+-- | Python exception converted to haskell
 data PyError = PyError String
   deriving stock (Show)
 
 instance Exception PyError
+
+
+-- | Monad for code which is interacts directly with python
+--   interpreter. It is single-threaded and all operations must
+--   acquire GIL in order to operate safely. This monad described
+--   single sequence of actions which are executed within single lock
+--   acquisition.
+newtype Py a = Py (IO a)
+  deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail)
+
+
+
+----------------------------------------------------------------
+-- inline-C
+----------------------------------------------------------------
 
 -- | @inline-c@ context for mapping
 pyCtx :: Context
