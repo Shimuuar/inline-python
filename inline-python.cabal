@@ -73,7 +73,7 @@ Library
 test-suite inline-python-tests
   import: language
   type:             exitcode-stdio-1.0
-  ghc-options:      -O2 -Wall -Wredundant-constraints
+  ghc-options:      -O2 -Wall -Wredundant-constraints -threaded
   hs-source-dirs:   test
   main-is:          main.hs
   other-modules:    TST.Run
@@ -84,6 +84,7 @@ test-suite inline-python-tests
 
 Executable pyt
   import: language
+  ghc-options:   -O2 -Wall -threaded
   Build-Depends: base
                , inline-python
   hs-source-dirs: exe

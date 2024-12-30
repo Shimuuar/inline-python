@@ -1,11 +1,13 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE QuasiQuotes               #-}
+{-# LANGUAGE RecordWildCards           #-}
 {-# LANGUAGE TemplateHaskell           #-}
 -- |
 -- Evaluation of python expressions
 module Python.Internal.Eval
   ( -- * Evaluator
     PyEvalReq(..)
+  , EvalStatus(..)
   , toPythonThread
   , pythonInterpreter
   , runPy
@@ -25,6 +27,7 @@ import Foreign.Storable
 import System.IO.Unsafe
 
 import Language.C.Inline          qualified as C
+import Language.C.Inline.Unsafe   qualified as CU
 import Language.Haskell.TH.Lib    qualified as TH
 import Language.Haskell.TH.Syntax qualified as TH
 
@@ -56,8 +59,20 @@ C.include "<inline-python.h>"
 -- send data between threads.
 
 
+-- | Status of evaluation request for python interprereter
+data EvalStatus
+  = Pending   -- ^ Request has not started evaluation
+  | Running   -- ^ Evaluation is in progress
+  | Cancelled -- ^ Request was cancelled
+  | Done      -- ^ Request finished evaluation
+  deriving stock Show
+
 -- | Evaluation request sent to
-data PyEvalReq = forall a. PyEvalReq (Py a) (MVar a)
+data PyEvalReq = forall a. PyEvalReq
+  { prog   :: (Py a)
+  , retval :: MVar (Either SomeException a)
+  , status :: MVar EvalStatus
+  }
 
 -- | Python evaluator reads messages from this MVar
 toPythonThread :: MVar PyEvalReq
@@ -71,12 +86,26 @@ pythonInterpreter = unsafePerformIO newEmptyMVar
 
 -- | Execute python action.
 runPy :: Py a -> IO a
-runPy (Py io) = io
+runPy py = do
+  retval <- newEmptyMVar
+  status <- newMVar Pending
+  (do putMVar toPythonThread $ PyEvalReq{ prog=py, ..}
+      takeMVar retval >>= \case
+        Left  e -> throwIO e
+        Right a -> pure a
+    ) `catch` onExc status
+ where
+   onExc :: MVar EvalStatus -> SomeException -> IO b
+   onExc status e = do
+     modifyMVar_ status $ \case
+       Pending   -> pure Cancelled
+       Cancelled -> pure Cancelled
+       Done      -> pure Done
+       Running   -> Cancelled <$ [CU.exp| void { PyErr_SetInterrupt() } |]
+     throwIO e
 
--- | Execute python action.
+
+-- | Execute python action. This function is unsafe and should be only
+--   called in thread of interpreter.
 unPy :: Py a -> IO a
 unPy (Py io) = io
-
-
-
-

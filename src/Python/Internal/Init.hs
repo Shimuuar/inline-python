@@ -2,16 +2,23 @@
 {-# LANGUAGE TemplateHaskell          #-}
 -- |
 -- Initialization and deinitialization of python interpreter
-module Python.Internal.Init where
+module Python.Internal.Init
+  ( initializePython
+  , finalizePython
+  , withPython
+  ) where
 
+import Control.Concurrent
 import Control.Exception
+import Control.Monad
 import Control.Monad.Trans.Cont
 import Control.Monad.IO.Class
 import Foreign.Marshal
 import Foreign.C.Types
 import System.Environment
 
-import Language.C.Inline         qualified as C
+import Language.C.Inline        qualified as C
+import Language.C.Inline.Unsafe qualified as CU
 
 import Python.Internal.Types
 import Python.Internal.Util
@@ -25,7 +32,52 @@ C.include "<inline-python.h>"
 
 -- | Initialize python interpreter
 initializePython :: IO ()
-initializePython = do
+initializePython = tryReadMVar pythonInterpreter >>= \case
+  Just _  -> pure ()
+  Nothing -> putMVar pythonInterpreter =<< forkOS pythonThread
+
+finalizePython :: IO ()
+finalizePython = tryReadMVar pythonInterpreter >>= \case
+  Just pid -> killThread pid
+  Nothing  -> pure ()
+
+withPython :: IO a -> IO a
+withPython = bracket_ initializePython finalizePython
+
+----------------------------------------------------------------
+-- Worker functions
+
+-- Main thread which does all python evaluation
+pythonThread :: IO ()
+pythonThread = doInializePython >> forever evalReq `finally` doFinalizePython
+
+evalReq :: IO ()
+evalReq = do
+  PyEvalReq{prog=Py io, retval, status} <- takeMVar toPythonThread
+  do_eval <- modifyMVar status $ \case
+    Running   -> error "Python evaluator: Internal error. Got 'Running' request"
+    Done      -> error "Python evaluator: Internal error. Got 'Done' request"
+    Cancelled -> return (Cancelled,False)
+    Pending   -> return (Running,  True)
+  when do_eval $ do
+    a <- (Right <$> io) `catches`
+         [ Handler $ \(e :: AsyncException) -> throwIO e
+         , Handler $ \(e :: SomeAsyncException) -> throwIO e
+         , Handler $ \(e :: SomeException)      -> pure (Left e)
+         ]
+    modifyMVar_ status $ \_ -> pure Done
+    -- It's possible that calling thread raised signal using
+    -- PyErr_SetInterrupt after we finished execution. At this point
+    -- we need to clear signals.
+    --
+    -- FIXME: Is this right way to do this?
+    -- FIXME: Do I need to clear exceptions as well?
+    [CU.exp| void { PyErr_CheckSignals() } |]
+    putMVar retval a
+
+
+doInializePython :: IO ()
+doInializePython = do
   -- NOTE: I'd like more direct access to argv
   argv0 <- getProgName
   argv  <- getArgs
@@ -67,8 +119,5 @@ initializePython = do
             _ -> error "Failed to initialize interpreter"
 
 
-finalizePython :: IO ()
-finalizePython = [C.exp| void { Py_Finalize(); } |]
-
-withPython :: IO a -> IO a
-withPython = bracket_ initializePython finalizePython
+doFinalizePython :: IO ()
+doFinalizePython = [C.exp| void { Py_Finalize(); } |]
