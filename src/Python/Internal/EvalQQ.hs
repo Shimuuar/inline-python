@@ -48,10 +48,11 @@ C.include "<inline-python.h>"
 -- | Evaluate expression within context of @__main__@ module. All
 --   variables defined in this evaluator persist.
 pyEvalInMain
-  :: Ptr PyObject -- ^ Dictionary of @__main__@ module
+  :: Ptr PyObject -- ^ Globals
+  -> Ptr PyObject -- ^ Locals
   -> String
   -> Py ()
-pyEvalInMain p_env src = evalContT $ do
+pyEvalInMain p_globals p_locals src = evalContT $ do
   p_py  <- withPyCString src
   p_err <- withPyAlloca @(Ptr CChar)
   r     <- liftIO [C.block| int {
@@ -64,8 +65,9 @@ pyEvalInMain p_env src = evalContT $ do
         return INLINE_PY_ERR_COMPILE;
     }
     // Execute in context of main
-    PyObject* globals = $(PyObject* p_env);
-    PyObject* r = PyEval_EvalCode(code, globals, globals);
+    PyObject* globals = $(PyObject* p_globals);
+    PyObject* locals  = $(PyObject* p_locals);
+    PyObject* r = PyEval_EvalCode(code, globals, locals);
     Py_XDECREF(r);
     if( PyErr_Occurred() ) {
         PyErr_Fetch( &e_type, &e_value, &e_trace);
