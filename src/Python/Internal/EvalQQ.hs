@@ -9,6 +9,7 @@ module Python.Internal.EvalQQ
   , basicNewDict
   , basicMainDict
   , basicBindInDict
+  , basicDecref
     -- * Python transformations
   , unindent
   ) where
@@ -27,6 +28,7 @@ import System.Exit
 import System.Process (readProcessWithExitCode)
 
 import Language.C.Inline          qualified as C
+import Language.C.Inline.Unsafe   qualified as CU
 import Language.Haskell.TH.Lib    qualified as TH
 import Language.Haskell.TH.Syntax qualified as TH
 
@@ -151,14 +153,17 @@ basicBindInDict name a p_dict = evalContT $ do
     } |]
 
 basicNewDict :: Py (Ptr PyObject)
-basicNewDict = Py [C.exp| PyObject* { PyDict_New() } |]
+basicNewDict = Py [CU.exp| PyObject* { PyDict_New() } |]
 
 -- | Return dict of @__main__@ module
 basicMainDict :: Py (Ptr PyObject)
-basicMainDict = Py [C.block| PyObject* {
+basicMainDict = Py [CU.block| PyObject* {
   PyObject* main_module = PyImport_AddModule("__main__");
   return PyModule_GetDict(main_module);
   }|]
+
+basicDecref :: Ptr PyObject -> Py ()
+basicDecref o = Py [CU.exp| void { Py_DECREF($(PyObject* o)) } |]
 
 
 ----------------------------------------------------------------

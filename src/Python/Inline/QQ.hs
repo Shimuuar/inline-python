@@ -35,7 +35,9 @@ py_ = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_globals <- basicMainDict
                                       p_locals  <- basicNewDict
                                       src   <- $(expQQ "exec" (unindent txt)) p_locals
-                                      pyEvalInMain p_globals p_locals src
+                                      res   <- pyEvalInMain p_globals p_locals src
+                                      basicDecref p_locals
+                                      return res
                          |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
@@ -47,7 +49,9 @@ pye :: QuasiQuoter
 pye = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_env <- basicNewDict
                                       src   <- $(expQQ "eval" (unindent txt)) p_env
-                                      pyEvalExpr p_env src
+                                      res   <- pyEvalExpr p_env src
+                                      basicDecref p_env
+                                      return res
                          |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
