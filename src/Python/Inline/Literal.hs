@@ -27,6 +27,8 @@ import Language.C.Inline.Unsafe  qualified as CU
 
 import Python.Types
 import Python.Internal.Types
+import Python.Internal.Eval
+
 
 ----------------------------------------------------------------
 C.context (C.baseCtx <> pyCtx)
@@ -43,7 +45,7 @@ class ToPy a where
   --
   --   This is low level function. It should be only used when working
   --   with python's C API. Otherwise 'toPy' is preferred.
-  basicToPy   :: a -> IO (Ptr PyObject)
+  basicToPy :: a -> Py (Ptr PyObject)
 
 -- | Convert python object to haskell value. 
 class FromPy a where
@@ -53,21 +55,21 @@ class FromPy a where
   --
   --   This is low level function. It should be only used when working
   --   with python's C API. Otherwise 'fromPy' is preferred.
-  basicFromPy :: Ptr PyObject -> IO (Maybe a)
+  basicFromPy :: Ptr PyObject -> Py (Maybe a)
 
 -- | Convert python object to haskell value
 fromPy :: FromPy a => PyObject -> IO (Maybe a)
-fromPy py = unsafeWithPyObject py basicFromPy
+fromPy py = runPy $ unsafeWithPyObject py basicFromPy
 
 -- | Convert haskell value to a python object
 toPy :: ToPy a => a -> IO PyObject
-toPy a = mask_ $ newPyObject =<< basicToPy a
+toPy a = runPy $ newPyObject =<< basicToPy a
 
 
 instance ToPy CLong where
-  basicToPy i = [CU.exp| PyObject* { PyLong_FromLong($(long i)) } |]
+  basicToPy i = Py [CU.exp| PyObject* { PyLong_FromLong($(long i)) } |]
 instance FromPy CLong where
-  basicFromPy p_py = evalContT $ do
+  basicFromPy p_py = Py $ evalContT $ do
     p_out <- ContT $ alloca @CLong
     r     <- liftIO $ [CU.block| int {
       * $(long* p_out) = PyLong_AsLong($(PyObject *p_py));
@@ -78,9 +80,9 @@ instance FromPy CLong where
       _ -> pure Nothing
 
 instance ToPy CLLong where
-  basicToPy i = [CU.exp| PyObject* { PyLong_FromLongLong($(long long i)) } |]
+  basicToPy i = Py [CU.exp| PyObject* { PyLong_FromLongLong($(long long i)) } |]
 instance FromPy CLLong where
-  basicFromPy p_py = evalContT $ do
+  basicFromPy p_py = Py $ evalContT $ do
     p_out <- ContT $ alloca @CLLong
     r     <- liftIO $ [CU.block| int {
       * $(long long* p_out) = PyLong_AsLongLong($(PyObject *p_py));
@@ -91,9 +93,9 @@ instance FromPy CLLong where
       _ -> pure Nothing
 
 instance ToPy CULong where
-  basicToPy i = [CU.exp| PyObject* { PyLong_FromUnsignedLong($(unsigned long i)) } |]
+  basicToPy i = Py [CU.exp| PyObject* { PyLong_FromUnsignedLong($(unsigned long i)) } |]
 instance FromPy CULong where
-  basicFromPy p_py = evalContT $ do
+  basicFromPy p_py = Py $ evalContT $ do
     p_out <- ContT $ alloca @CULong
     r     <- liftIO $ [CU.block| int {
       * $(unsigned long* p_out) = PyLong_AsUnsignedLong($(PyObject *p_py));
@@ -104,9 +106,9 @@ instance FromPy CULong where
       _ -> pure Nothing
 
 instance ToPy CULLong where
-  basicToPy i = [CU.exp| PyObject* { PyLong_FromUnsignedLongLong($(unsigned long long i)) } |]
+  basicToPy i = Py [CU.exp| PyObject* { PyLong_FromUnsignedLongLong($(unsigned long long i)) } |]
 instance FromPy CULLong where
-  basicFromPy p_py = evalContT $ do
+  basicFromPy p_py = Py $ evalContT $ do
     p_out <- ContT $ alloca @CULLong
     r     <- liftIO $ [CU.block| int {
       * $(unsigned long long* p_out) = PyLong_AsUnsignedLongLong($(PyObject *p_py));
@@ -117,9 +119,9 @@ instance FromPy CULLong where
       _ -> pure Nothing
 
 instance ToPy CDouble where
-  basicToPy i = [CU.exp| PyObject* { PyFloat_FromDouble($(double i)) } |]
+  basicToPy i = Py [CU.exp| PyObject* { PyFloat_FromDouble($(double i)) } |]
 instance FromPy CDouble where
-  basicFromPy p_py = evalContT $ do
+  basicFromPy p_py = Py $ evalContT $ do
     p_out <- ContT $ alloca @CDouble
     r     <- liftIO $ [CU.block| int {
       * $(double* p_out) = PyFloat_AsDouble($(PyObject *p_py));
@@ -181,13 +183,13 @@ instance FromPy Int where
 
 
 instance (FromPy a, ToPy b) => ToPy (a -> IO b) where
-  basicToPy f = do
+  basicToPy f = Py $ do
     -- C function pointer for callback
-    f_ptr <- wrapO $ \_ p_a -> runPY $ do
-      a <- liftIO (basicFromPy p_a) >>= \case
+    f_ptr <- wrapO $ \_ p_a -> pyProg $ do
+      a <- liftIO (unPy (basicFromPy p_a)) >>= \case
         Nothing -> abort $ raiseUndecodedArg 1 1
         Just a  -> pure a
-      liftIO $ basicToPy =<< f a
+      liftIO $ unPy . basicToPy =<< f a
     --
     [C.exp| PyObject* {
       inline_py_function_wrapper(
@@ -196,13 +198,13 @@ instance (FromPy a, ToPy b) => ToPy (a -> IO b) where
       }|]
 
 instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
-  basicToPy f = do
+  basicToPy f = Py $ do
     -- Create haskell function
-    f_ptr <- wrapFastcall $ \_ p_arr n -> runPY $ do
+    f_ptr <- wrapFastcall $ \_ p_arr n -> pyProg $ do
       when (n /= 2) $ abort $ raiseBadNArgs 2 n
       a <- loadArgFastcall p_arr 0 n
       b <- loadArgFastcall p_arr 1 n
-      liftIO $ basicToPy =<< f a b
+      liftIO $ unPy . basicToPy =<< f a b
     -- Create python function
     [C.block| PyObject* {
       _PyCFunctionFast impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*const*, int64_t));
@@ -214,8 +216,9 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
 type PyProg r a = ContT r IO a
 
 loadArgFastcall :: FromPy a => Ptr (Ptr PyObject) -> Int -> Int64 -> PyProg (Ptr PyObject) a
-loadArgFastcall p_arr i tot =
-  liftIO (peekElemOff p_arr i >>= basicFromPy) >>= \case
+loadArgFastcall p_arr i tot = do
+  p <- liftIO $ peekElemOff p_arr i
+  liftIO (unPy (basicFromPy p)) >>= \case
     Nothing -> abort $ raiseUndecodedArg (fromIntegral i + 1) (fromIntegral tot)
     Just a  -> pure a
 
@@ -239,8 +242,8 @@ raiseBadNArgs tot n = [CU.block| PyObject* {
   return NULL;
   } |]
 
-runPY :: PyProg (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
-runPY io = evalContT io `catch` convertHaskellException
+pyProg :: PyProg (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
+pyProg io = evalContT io `catch` convertHaskellException
 
 convertHaskellException :: SomeException -> IO (Ptr PyObject)
 convertHaskellException err = do

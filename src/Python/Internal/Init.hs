@@ -15,7 +15,7 @@ import Language.C.Inline         qualified as C
 
 import Python.Internal.Types
 import Python.Internal.Util
-
+import Python.Internal.Eval
 
 ----------------------------------------------------------------
 C.context (C.baseCtx <> pyCtx)

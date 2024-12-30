@@ -8,13 +8,14 @@ module Python.Inline.QQ
 
 import Language.Haskell.TH.Quote
 
+import Python.Internal.EvalQQ
 import Python.Internal.Eval
 
 py :: QuasiQuoter
 py = QuasiQuoter
-  { quoteExp  = \txt -> [| do p_env <- basicMainDict
-                              src   <- $(expQQ "exec" (unindent txt)) p_env
-                              pyEvalInMain p_env src
+  { quoteExp  = \txt -> [| runPy $ do p_env <- basicMainDict
+                                      src   <- $(expQQ "exec" (unindent txt)) p_env
+                                      pyEvalInMain p_env src
                          |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
@@ -23,9 +24,9 @@ py = QuasiQuoter
 
 pye :: QuasiQuoter
 pye = QuasiQuoter
-  { quoteExp  = \txt -> [| do p_env <- basicNewDict
-                              src   <- $(expQQ "eval" (unindent txt)) p_env
-                              pyEvalExpr p_env src
+  { quoteExp  = \txt -> [| runPy $ do p_env <- basicNewDict
+                                      src   <- $(expQQ "eval" (unindent txt)) p_env
+                                      pyEvalExpr p_env src
                          |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"

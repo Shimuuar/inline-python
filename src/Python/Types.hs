@@ -25,12 +25,16 @@ C.context (C.baseCtx <> pyCtx)
 C.include "<inline-python.h>"
 ----------------------------------------------------------------
 
-unsafeWithPyObject :: forall a. PyObject -> (Ptr PyObject -> IO a) -> IO a
+unsafeWithPyObject :: forall a. PyObject -> (Ptr PyObject -> Py a) -> Py a
 unsafeWithPyObject = coerce (unsafeWithForeignPtr @PyObject @a)
 
-newPyObject :: Ptr PyObject -> IO PyObject
+
+-- FIXME: !!! We can call DECREF in python thread only!!!
+
+newPyObject :: Ptr PyObject -> Py PyObject
 newPyObject
-  = fmap PyObject
+  = Py
+  . fmap PyObject
   . newForeignPtr py_XDECREF
 
 py_XDECREF :: FunPtr (Ptr PyObject -> IO ())

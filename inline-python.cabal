@@ -67,6 +67,7 @@ Library
     Python.Internal.Init
     Python.Internal.Util
     Python.Internal.Eval
+    Python.Internal.EvalQQ
     Paths_inline_python
 
 test-suite inline-python-tests
