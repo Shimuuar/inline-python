@@ -9,7 +9,7 @@ module Python.Internal.Types
   ( -- * Data type
     PyObject(..)
   , PyError(..)
-  , Py
+  , Py(..)
     -- * inline-C
   , pyCtx
     -- * Patterns
