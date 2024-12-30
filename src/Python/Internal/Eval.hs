@@ -243,6 +243,7 @@ doInializePython = do
       //--
       status = PyConfig_SetBytesString(&cfg, &cfg.program_name, "XX");
       if (PyStatus_Exception(status)) { goto error; }
+      cfg.parse_argv = 0;
       //--
       status = PyConfig_SetArgv(&cfg,
           $(int       n_argv),
