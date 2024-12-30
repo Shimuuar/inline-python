@@ -4,7 +4,8 @@
 -- |
 -- Conversion between haskell data types and python values
 module Python.Inline.Literal
-  ( Literal(..)
+  ( FromPy(..)
+  , ToPy(..)
   , toPy
   , fromPy
   ) where
@@ -32,23 +33,40 @@ C.context (C.baseCtx <> pyCtx)
 C.include "<inline-python.h>"
 ----------------------------------------------------------------
 
-class Literal a where
-  -- | Convert haskell value to python object. It should generate new
-  --   object (except for immortals like None, True, etc).
+-- | Convert haskell value to python value. 
+class ToPy a where
+  -- | Convert haskell value to python object. This function returns
+  --   strong reference to newly create objects (except singletons
+  --   like @None@, @True@, etc). Normally conversion should not fail
+  --   but when it does function must raise suitable python exception
+  --   and return @NULL@. Caller must check that.
+  --
+  --   This is low level function. It should be only used when working
+  --   with python's C API. Otherwise 'toPy' is preferred.
   basicToPy   :: a -> IO (Ptr PyObject)
-  -- |
+
+-- | Convert python object to haskell value. 
+class FromPy a where
+  -- | Convert python value into haskell value. This function should
+  --   not modify python's data and raise both python and haskell
+  --   exceptions.
+  --
+  --   This is low level function. It should be only used when working
+  --   with python's C API. Otherwise 'fromPy' is preferred.
   basicFromPy :: Ptr PyObject -> IO (Maybe a)
 
-fromPy :: Literal a => PyObject -> IO (Maybe a)
+-- | Convert python object to haskell value
+fromPy :: FromPy a => PyObject -> IO (Maybe a)
 fromPy py = unsafeWithPyObject py basicFromPy
 
-toPy :: Literal a => a -> IO PyObject
+-- | Convert haskell value to a python object
+toPy :: ToPy a => a -> IO PyObject
 toPy a = mask_ $ newPyObject =<< basicToPy a
 
 
-instance Literal CLong where
-  basicToPy i =
-    [CU.exp| PyObject* { PyLong_FromLong($(long i)) } |]
+instance ToPy CLong where
+  basicToPy i = [CU.exp| PyObject* { PyLong_FromLong($(long i)) } |]
+instance FromPy CLong where
   basicFromPy p_py = evalContT $ do
     p_out <- ContT $ alloca @CLong
     r     <- liftIO $ [CU.block| int {
@@ -59,9 +77,9 @@ instance Literal CLong where
       0 -> Just <$> peek p_out
       _ -> pure Nothing
 
-instance Literal CLLong where
-  basicToPy i =
-    [CU.exp| PyObject* { PyLong_FromLongLong($(long long i)) } |]
+instance ToPy CLLong where
+  basicToPy i = [CU.exp| PyObject* { PyLong_FromLongLong($(long long i)) } |]
+instance FromPy CLLong where
   basicFromPy p_py = evalContT $ do
     p_out <- ContT $ alloca @CLLong
     r     <- liftIO $ [CU.block| int {
@@ -72,9 +90,9 @@ instance Literal CLLong where
       0 -> Just <$> peek p_out
       _ -> pure Nothing
 
-instance Literal CULong where
-  basicToPy i =
-    [CU.exp| PyObject* { PyLong_FromUnsignedLong($(unsigned long i)) } |]
+instance ToPy CULong where
+  basicToPy i = [CU.exp| PyObject* { PyLong_FromUnsignedLong($(unsigned long i)) } |]
+instance FromPy CULong where
   basicFromPy p_py = evalContT $ do
     p_out <- ContT $ alloca @CULong
     r     <- liftIO $ [CU.block| int {
@@ -85,9 +103,9 @@ instance Literal CULong where
       0 -> Just <$> peek p_out
       _ -> pure Nothing
 
-instance Literal CULLong where
-  basicToPy i =
-    [CU.exp| PyObject* { PyLong_FromUnsignedLongLong($(unsigned long long i)) } |]
+instance ToPy CULLong where
+  basicToPy i = [CU.exp| PyObject* { PyLong_FromUnsignedLongLong($(unsigned long long i)) } |]
+instance FromPy CULLong where
   basicFromPy p_py = evalContT $ do
     p_out <- ContT $ alloca @CULLong
     r     <- liftIO $ [CU.block| int {
@@ -98,9 +116,9 @@ instance Literal CULLong where
       0 -> Just <$> peek p_out
       _ -> pure Nothing
 
-instance Literal CDouble where
-  basicToPy i =
-    [CU.exp| PyObject* { PyFloat_FromDouble($(double i)) } |]
+instance ToPy CDouble where
+  basicToPy i = [CU.exp| PyObject* { PyFloat_FromDouble($(double i)) } |]
+instance FromPy CDouble where
   basicFromPy p_py = evalContT $ do
     p_out <- ContT $ alloca @CDouble
     r     <- liftIO $ [CU.block| int {
@@ -111,12 +129,16 @@ instance Literal CDouble where
       0 -> Just <$> peek p_out
       _ -> pure Nothing
 
-deriving via CLLong  instance Literal Int64
-deriving via CULLong instance Literal Word64
-deriving via CDouble instance Literal Double
+deriving via CLLong  instance ToPy   Int64
+deriving via CLLong  instance FromPy Int64
+deriving via CULLong instance ToPy   Word64
+deriving via CULLong instance FromPy Word64
+deriving via CDouble instance ToPy   Double
+deriving via CDouble instance FromPy Double
 
-instance Literal Int where
+instance ToPy Int where
   basicToPy   = basicToPy @Int64 . fromIntegral
+instance FromPy Int where
   basicFromPy = (fmap . fmap) fromIntegral . basicFromPy @Int64
 
 
@@ -158,7 +180,7 @@ instance Literal Int where
 --        with async exception out of the blue
 
 
-instance (Literal a, Literal b) => Literal (a -> IO b) where
+instance (FromPy a, ToPy b) => ToPy (a -> IO b) where
   basicToPy f = do
     -- C function pointer for callback
     f_ptr <- wrapO $ \_ p_a -> runPY $ do
@@ -172,9 +194,8 @@ instance (Literal a, Literal b) => Literal (a -> IO b) where
           $(PyObject* (*f_ptr)(PyObject*, PyObject*)),
           METH_O)
       }|]
-  basicFromPy = error "IMPOSSIBLE!"
 
-instance (Literal a1, Literal a2, Literal b) => Literal (a1 -> a2 -> IO b) where
+instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
   basicToPy f = do
     -- Create haskell function
     f_ptr <- wrapFastcall $ \_ p_arr n -> runPY $ do
@@ -193,7 +214,6 @@ instance (Literal a1, Literal a2, Literal b) => Literal (a1 -> a2 -> IO b) where
           (PyCFunction)impl,
           METH_FASTCALL);
       }|]
-  basicFromPy = error "IMPOSSIBLE!"
 
 
 

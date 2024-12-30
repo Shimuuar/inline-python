@@ -5,7 +5,8 @@ module Python.Inline
   , withPython
   , PyObject
   , PyError(..)
-  , Literal(..)
+  , ToPy(..)
+  , FromPy(..)
   , toPy
   , fromPy
   ) where

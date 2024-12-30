@@ -132,7 +132,7 @@ finiEval p_err r fini = case r of
             throwIO $ PyError s
   _ -> error $ "pyEvalStr: unexpected error: " ++ show r
 
-basicBindInDict :: Literal a => String -> a -> Ptr PyObject -> IO ()
+basicBindInDict :: ToPy a => String -> a -> Ptr PyObject -> IO ()
 basicBindInDict name a p_dict = evalContT $ do
   -- FIXME: error handling
   -- FIXME: meanining of errors in PyUnicode_DecodeUTF8?
