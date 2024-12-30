@@ -51,10 +51,11 @@ Library
   hs-source-dirs:    src
   include-dirs:      include
   c-sources:         cbits/python.c
+  cc-options:        -g -Wall
   -- FIXME: I think should use python-config instead of pkg-config. For now this
   --        will do
   pkgconfig-depends: python3
-  extra-libraries:   python3.12  
+  extra-libraries:   python3.12
   --
   Exposed-modules:
     Python.Inline.Literal
@@ -67,6 +68,18 @@ Library
     Python.Internal.Util
     Python.Internal.Eval
     Paths_inline_python
+
+test-suite inline-python-tests
+  import: language
+  type:             exitcode-stdio-1.0
+  ghc-options:      -O2 -Wall -Wredundant-constraints
+  hs-source-dirs:   test
+  main-is:          main.hs
+  other-modules:    TST.Run
+  build-depends:    base             >=4.5 && <5
+                  , inline-python
+                  , tasty            >=1.2
+                  , tasty-hunit      >=0.10
 
 Executable pyt
   import: language
