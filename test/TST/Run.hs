@@ -13,6 +13,7 @@ tests = testGroup "Run python"
   [ testCase "Empty QQ" [py_| |]
   , testCase "Python exceptions are converted" $ throwsPy [py_| 1 / 0 |]
   , testsScope
+  , testCapture
   ]
 
 
@@ -59,6 +60,53 @@ testsScope = testGroup "Variable scope"
              except NameError:
                  pass
              |]
+  ]
+
+
+
+testCapture :: TestTree
+testCapture = testGroup "Capture of vars"
+  [ testCase "Capture int"    $ let i = 1::Int      in [py_| assert i_hs == 1   |]
+  , testCase "Capture double" $ let x = 1.5::Double in [py_| assert x_hs == 1.5 |]
+    --
+  , testCase "Closure(arity=1)" $ do
+      let double = pure . (*2) :: Int -> IO Int
+      [py_|
+          assert double_hs(3) == 6
+          # Invalid arg
+          try:
+              double_hs(None)
+          except TypeError as e:
+              pass
+          # Wrong arg number
+          try:
+              double_hs(1,2,3)
+          except TypeError as e:
+              pass
+          |]
+  , testCase "Closure(arity=2)" $ do
+      let foo :: Int -> Double -> IO Int
+          foo x y = pure $ x + round y
+      [py_|
+          assert foo_hs(3, 100.2) == 103
+          assert foo_hs(3, 100)   == 103
+          # Invalid arg
+          try:
+              foo_hs(None, 100)
+          except TypeError as e:
+              pass
+          # Wrong arg number
+          try:
+              foo_hs(1,2,3)
+          except TypeError as e:
+              pass
+
+          |]
+    --
+  , testCase "Haskell exception in callbacks" $ do
+      let foo :: Int -> Int -> IO Int
+          foo x y = pure $ x `div` y
+      throwsPy [py_| foo_hs(1, 0) |]
   ]
 
 

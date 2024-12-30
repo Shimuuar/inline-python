@@ -230,7 +230,7 @@ raiseUndecodedArg :: CInt -> CInt -> IO (Ptr PyObject)
 raiseUndecodedArg n tot = [CU.block| PyObject* {
   char err[256];
   sprintf(err, "Failed to decode function argument %i of %i", $(int n), $(int tot));
-  PyErr_SetString(PyExc_RuntimeError, err);
+  PyErr_SetString(PyExc_TypeError, err);
   return NULL;
   } |]
 
@@ -238,7 +238,7 @@ raiseBadNArgs :: CInt -> Int64 -> IO (Ptr PyObject)
 raiseBadNArgs tot n = [CU.block| PyObject* {
   char err[256];
   sprintf(err, "Function takes exactly %i arguments (%li given)", $(int tot), $(int64_t n));
-  PyErr_SetString(PyExc_RuntimeError, err);
+  PyErr_SetString(PyExc_TypeError, err);
   return NULL;
   } |]
 
