@@ -33,6 +33,7 @@ import Language.Haskell.TH.Syntax qualified as TH
 import Python.Types
 import Python.Internal.Types
 import Python.Internal.Util
+import Python.Internal.Eval
 import Python.Inline.Literal
 import Paths_inline_python (getDataFileName)
 

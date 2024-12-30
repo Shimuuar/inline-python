@@ -12,6 +12,8 @@ module Python.Internal.Eval
   , initializePython
   , finalizePython
   , withPython
+    -- * PyObject wrapper
+  , newPyObject
   ) where
 
 import Control.Concurrent
@@ -19,6 +21,9 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
+import Foreign.Concurrent        qualified as GHC
+import Foreign.Ptr
+import Foreign.ForeignPtr
 import Foreign.C.Types
 import Foreign.Marshal.Array
 import System.Environment
@@ -63,6 +68,12 @@ C.include "<inline-python.h>"
 -- MVars and send it to worker thread. Then we await result from MVar.
 --
 -- For handling of exceptions see [Threading and exceptions]
+--
+--
+-- Finally last round of problems is GC. We cannot simply call
+-- Py_DECREF in any thread. So we have to be build list of Ptrs to be
+-- DECREF'ed and worker thread would traverse that list when it gets
+-- to it.
 
 
 
@@ -115,15 +126,27 @@ data PyEvalReq = forall a. PyEvalReq
   , status :: MVar EvalStatus
   }
 
--- | Python evaluator reads messages from this MVar
+-- | List of pointer. We use it instead of list in order to save on
+--   allocations
+data PyObjectList
+  = Nil
+  | Cons !(Ptr PyObject) PyObjectList
+
+
+-- Python evaluator reads messages from this MVar
 toPythonThread :: MVar PyEvalReq
 toPythonThread = unsafePerformIO newEmptyMVar
 {-# NOINLINE toPythonThread #-}
 
--- | ThreadId of thread running python's interpreter
+-- ThreadId of thread running python's interpreter
 pythonInterpreter :: MVar ThreadId
 pythonInterpreter = unsafePerformIO newEmptyMVar
 {-# NOINLINE pythonInterpreter #-}
+
+-- List of python object waiting for Py_DECREF
+toDECREF :: MVar PyObjectList
+toDECREF = unsafePerformIO $ newMVar Nil
+{-# NOINLINE toDECREF #-}
 
 
 ----------------------------------------------------------------
@@ -252,6 +275,12 @@ evalReq :: IO ()
 -- See NOTE: [Threading and exceptions]
 evalReq = do
   PyEvalReq{prog=Py io, result, status} <- takeMVar toPythonThread
+  -- GC
+  let decref Nil = pure ()
+      decref (p `Cons` ps) = do [CU.exp| void { Py_XDECREF($(PyObject* p)) } |]
+                                decref ps
+  decref =<< modifyMVar toDECREF (\xs -> pure (Nil, xs))
+  -- Update status of request
   do_eval <- modifyMVar status $ \case
     Running   -> error "Python evaluator: Internal error. Got 'Running' request"
     Done      -> error "Python evaluator: Internal error. Got 'Done' request"
@@ -272,3 +301,25 @@ evalReq = do
     -- FIXME: Do I need to clear exceptions as well?
     [CU.exp| void { PyErr_CheckSignals() } |]
     putMVar result a
+
+
+----------------------------------------------------------------
+-- Creation of PyObject
+----------------------------------------------------------------
+
+
+-- | Wrap raw python object into
+newPyObject :: Ptr PyObject -> Py PyObject
+-- We need to use different implementation for different RTS
+-- See NOTE: [Python and threading]
+newPyObject p
+  | rtsSupportsBoundThreads = Py $ do
+      fptr <- newForeignPtr_ p
+      GHC.addForeignPtrFinalizer fptr $ modifyMVar_ toDECREF (pure . Cons p)
+      pure $ PyObject fptr
+  | otherwise = Py $ do
+      fptr <- newForeignPtr_ p
+      PyObject fptr <$ addForeignPtrFinalizer py_XDECREF fptr
+
+py_XDECREF :: FunPtr (Ptr PyObject -> IO ())
+py_XDECREF = [C.funPtr| void inline_py_XDECREF(PyObject* p) { Py_XDECREF(p); } |]
