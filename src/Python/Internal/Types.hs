@@ -43,13 +43,12 @@ instance Exception PyError
 
 
 -- | Monad for code which is interacts directly with python
---   interpreter. It is single-threaded and all operations must
---   acquire GIL in order to operate safely. This monad described
---   single sequence of actions which are executed within single lock
---   acquisition.
+--   interpreter. It's needed because in multithreaded runtime one
+--   can't call python's C function from any thread. We need to send
+--   it for execution on designated OS thread. 
 newtype Py a = Py (IO a)
   deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail)
-
+-- See NOTE: [Python and threading]
 
 
 ----------------------------------------------------------------

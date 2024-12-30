@@ -1,7 +1,6 @@
 -- |
 module Python.Internal.Util where
 
-import Control.Exception
 import Control.Monad.Trans.Cont
 import Data.Char
 import Data.Coerce

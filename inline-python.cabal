@@ -65,7 +65,6 @@ Library
     Python.Types
   Other-modules:
     Python.Internal.Types
-    Python.Internal.Init
     Python.Internal.Util
     Python.Internal.Eval
     Python.Internal.EvalQQ
