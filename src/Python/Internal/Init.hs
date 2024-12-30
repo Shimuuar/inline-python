@@ -32,14 +32,19 @@ C.include "<inline-python.h>"
 
 -- | Initialize python interpreter
 initializePython :: IO ()
-initializePython = tryReadMVar pythonInterpreter >>= \case
-  Just _  -> pure ()
-  Nothing -> putMVar pythonInterpreter =<< forkOS pythonThread
+initializePython
+  | rtsSupportsBoundThreads = tryReadMVar pythonInterpreter >>= \case
+      Just _  -> pure ()
+      Nothing -> putMVar pythonInterpreter =<< forkOS pythonThread
+  | otherwise = doInializePython
+
 
 finalizePython :: IO ()
-finalizePython = tryReadMVar pythonInterpreter >>= \case
-  Just pid -> killThread pid
-  Nothing  -> pure ()
+finalizePython
+  | rtsSupportsBoundThreads = tryReadMVar pythonInterpreter >>= \case
+      Just pid -> killThread pid
+      Nothing  -> pure ()
+  | otherwise = doFinalizePython
 
 withPython :: IO a -> IO a
 withPython = bracket_ initializePython finalizePython

@@ -86,24 +86,27 @@ pythonInterpreter = unsafePerformIO newEmptyMVar
 
 -- | Execute python action.
 runPy :: Py a -> IO a
-runPy py = do
-  retval <- newEmptyMVar
-  status <- newMVar Pending
-  (do putMVar toPythonThread $ PyEvalReq{ prog=py, ..}
-      takeMVar retval >>= \case
-        Left  e -> throwIO e
-        Right a -> pure a
-    ) `catch` onExc status
- where
-   onExc :: MVar EvalStatus -> SomeException -> IO b
-   onExc status e = do
-     modifyMVar_ status $ \case
-       Pending   -> pure Cancelled
-       Cancelled -> pure Cancelled
-       Done      -> pure Done
-       Running   -> Cancelled <$ [CU.exp| void { PyErr_SetInterrupt() } |]
-     throwIO e
-
+runPy py
+  -- Case of threaded runtime
+  | rtsSupportsBoundThreads = do
+      retval <- newEmptyMVar
+      status <- newMVar Pending
+      let onExc :: MVar EvalStatus -> SomeException -> IO b
+          onExc status e = do
+            modifyMVar_ status $ \case
+              Pending   -> pure Cancelled
+              Cancelled -> pure Cancelled
+              Done      -> pure Done
+              Running   -> Cancelled <$ [CU.exp| void { PyErr_SetInterrupt() } |]
+            throwIO e
+      (do putMVar toPythonThread $ PyEvalReq{ prog=py, ..}
+          takeMVar retval >>= \case
+            Left  e -> throwIO e
+            Right a -> pure a
+        ) `catch` onExc status
+  -- Case of single-threaded runtime. We don't need to jump through
+  -- any hoops here
+  | otherwise = unPy py
 
 -- | Execute python action. This function is unsafe and should be only
 --   called in thread of interpreter.
