@@ -43,9 +43,6 @@ PyObject *inline_py_function_wrapper(PyCFunction fun, int flags) {
     return f;    
 }
 
-// HACK: Simply copied from GHC sources. I hope it's stable enough
-void freeHaskellFunctionPtr (void* ptr);
-
 void inline_py_free_capsule(PyObject* py) {
     PyMethodDef *meth = PyCapsule_GetPointer(py, NULL);
     // HACK: We want to release wrappers created by wrapper. It

@@ -2,6 +2,8 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include <Rts.h>
+
 
 // Standard status codesu
 #define INLINE_PY_OK          0
