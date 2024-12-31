@@ -3,11 +3,14 @@ Build-Type:     Simple
 
 Name:           inline-python
 Version:        0.1
-Synopsis:       Embedding python interpreter into haskell
+Synopsis:       Python interpreter embedded into haskell.
 Description:
-  Embedding python interpreter
+  This package embeds python interpreter into haskell program and
+  allows to write python snippets as quasiquotes. Values could be
+  easily transferred between python and haskell. It's possible to
+  call haskell from python as well.
 
-  License:        BSD-3-Clause
+License:        BSD-3-Clause
 License-File:   LICENSE
 Author:         Aleksey Khudyakov <alexey.skladnoy@gmail.com>
 Maintainer:     Aleksey Khudyakov <alexey.skladnoy@gmail.com>
@@ -16,6 +19,8 @@ Bug-reports:    https://github.com/Shimuuar/inline-python/issues
 Category:       FFI
 extra-doc-files:
   ChangeLog.md
+extra-source-files:
+  include/inline-python.h
 data-files:
   py/bound-vars.py
 
@@ -41,22 +46,19 @@ common language
 ----------------------------------------------------------------
 Library
   import:            language
-  Build-Depends:     base      >=4.14 && <5
-                   , primitive >=0.6.2
-                   , vector    >=0.13.2
-                   , containers
+  Build-Depends:     base             >=4.14 && <5
+                   , primitive        >=0.6.2
+                   , vector           >=0.13.2
+                   , containers       >=0.5
                    , process
-                   , transformers
-                   , inline-c  >=0.9.1
-                   , template-haskell
+                   , transformers     >=0.4
+                   , inline-c         >=0.9.1
+                   , template-haskell -any
   hs-source-dirs:    src
   include-dirs:      include
   c-sources:         cbits/python.c
   cc-options:        -g -Wall
-  -- FIXME: I think should use python-config instead of pkg-config. For now this
-  --        will do
-  pkgconfig-depends: python3
-  extra-libraries:   python3.12
+  pkgconfig-depends: python3-embed
   --
   Exposed-modules:
     Python.Inline.Literal
@@ -68,6 +70,8 @@ Library
     Python.Internal.Util
     Python.Internal.Eval
     Python.Internal.EvalQQ
+    Paths_inline_python
+  Autogen-modules:
     Paths_inline_python
 
 ----------------------------------------------------------------
@@ -101,12 +105,3 @@ test-suite inline-python-tests1
                   , inline-python
                   , inline-python:test
                   , tasty
-
-
--- Executable pyt
---   import: language
---   ghc-options:   -O2 -Wall -threaded
---   Build-Depends: base
---                , inline-python
---   hs-source-dirs: exe
---   Main-is:        tst.hs
