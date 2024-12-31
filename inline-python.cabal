@@ -16,6 +16,8 @@ Bug-reports:    https://github.com/Shimuuar/inline-python/issues
 Category:       FFI
 extra-doc-files:
   ChangeLog.md
+extra-source-files:
+  include/inline-python.h
 data-files:
   py/bound-vars.py
 
@@ -53,10 +55,7 @@ Library
   include-dirs:      include
   c-sources:         cbits/python.c
   cc-options:        -g -Wall
-  -- FIXME: I think should use python-config instead of pkg-config. For now this
-  --        will do
-  pkgconfig-depends: python3
-  extra-libraries:   python3.12
+  pkgconfig-depends: python3-embed
   --
   Exposed-modules:
     Python.Inline.Literal
