@@ -100,12 +100,3 @@ test-suite inline-python-tests1
                   , inline-python
                   , inline-python:test
                   , tasty
-
-
--- Executable pyt
---   import: language
---   ghc-options:   -O2 -Wall -threaded
---   Build-Depends: base
---                , inline-python
---   hs-source-dirs: exe
---   Main-is:        tst.hs
