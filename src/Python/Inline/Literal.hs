@@ -153,10 +153,16 @@ instance ToPy Bool where
 -- | Uses python's truthiness conventions
 instance FromPy Bool where
   basicFromPy p = Py $ do
-    r <- [CU.exp| int { Py_IsTrue($(PyObject* p)) } |]
+    r <- [CU.block| int {
+      int r = PyObject_IsTrue($(PyObject* p));
+      PyErr_Clear();
+      return r;
+      } |]
     case r of
       0 -> pure $ Just False
-      _ -> pure $ Just True
+      1 -> pure $ Just True
+      _ -> pure $ Nothing
+
 
 ----------------------------------------------------------------
 -- Functions marshalling
