@@ -34,6 +34,13 @@ tests = testGroup "FromPy"
         -- Segfaults if exception is not cleared
         [py_| 1+1 |]
     ]
+  , testGroup "Tuple2"
+    [ testCase "(2)->2" $ eq @(Int,Bool) (Just (2,True)) =<< [pye| (2,2) |]
+    , testCase "[2]->2" $ eq @(Int,Bool) (Just (2,True)) =<< [pye| [2,2] |]
+    , testCase "(1)->2" $ eq @(Int,Bool) Nothing =<< [pye| (1)     |]
+    , testCase "(3)->2" $ eq @(Int,Bool) Nothing =<< [pye| (1,2,3) |]
+    , testCase "X->2"   $ eq @(Int,Bool) Nothing =<< [pye| 2 |]
+    ]
   ]
 
 eq :: (Eq a, Show a, FromPy a) => Maybe a -> PyObject -> IO ()

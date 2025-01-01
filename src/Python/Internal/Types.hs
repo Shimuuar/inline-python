@@ -10,6 +10,7 @@ module Python.Internal.Types
     PyObject(..)
   , PyError(..)
   , Py(..)
+  , finallyPy
     -- * inline-C
   , pyCtx
     -- * Patterns
@@ -20,6 +21,7 @@ module Python.Internal.Types
 
 import Control.Exception
 import Control.Monad.IO.Class
+import Data.Coerce
 import Data.Map.Strict           qualified as Map
 import Foreign.ForeignPtr
 import Foreign.C.Types
@@ -50,6 +52,8 @@ newtype Py a = Py (IO a)
   deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail)
 -- See NOTE: [Python and threading]
 
+finallyPy :: forall a b. Py a -> Py b -> Py a
+finallyPy = coerce (finally @a @b)
 
 ----------------------------------------------------------------
 -- inline-C

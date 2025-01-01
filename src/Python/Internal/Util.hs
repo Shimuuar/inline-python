@@ -25,6 +25,9 @@ withWCtring = withArray0 (CWchar 0) . map (fromIntegral . ord)
 withPyAlloca :: forall a r. Storable a => ContT r Py (Ptr a)
 withPyAlloca = coerce (alloca @a @r)
 
+withPyAllocaArray :: forall a r. Storable a => Int -> ContT r Py (Ptr a)
+withPyAllocaArray = coerce (allocaArray @a @r)
+
 withPyCString :: forall r. String -> ContT r Py CString
 withPyCString = coerce (withCString @r)
 
