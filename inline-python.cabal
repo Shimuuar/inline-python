@@ -84,6 +84,7 @@ library test
   hs-source-dirs:   test
   Exposed-modules:
     TST.Run
+    TST.FromPy
 
 test-suite inline-python-tests
   import:           language

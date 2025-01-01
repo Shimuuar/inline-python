@@ -13,6 +13,7 @@ module Python.Inline.Literal
 import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
+import Control.Monad.Trans.Class
 import Control.Monad.Trans.Cont
 import Data.Int
 import Data.Word
@@ -28,6 +29,7 @@ import Language.C.Inline.Unsafe  qualified as CU
 import Python.Types
 import Python.Internal.Types
 import Python.Internal.Eval
+import Python.Internal.Util
 
 
 ----------------------------------------------------------------
@@ -142,6 +144,60 @@ instance ToPy Int where
   basicToPy   = basicToPy @Int64 . fromIntegral
 instance FromPy Int where
   basicFromPy = (fmap . fmap) fromIntegral . basicFromPy @Int64
+
+-- TODO: Int may be 32 or 64 bit!
+-- TODO: Int{8,16,32} & Word{8,16,32}
+
+instance ToPy Bool where
+  basicToPy True  = Py [CU.exp| PyObject* { Py_True  } |]
+  basicToPy False = Py [CU.exp| PyObject* { Py_False } |]
+
+-- | Uses python's truthiness conventions
+instance FromPy Bool where
+  basicFromPy p = Py $ do
+    r <- [CU.block| int {
+      int r = PyObject_IsTrue($(PyObject* p));
+      PyErr_Clear();
+      return r;
+      } |]
+    case r of
+      0 -> pure $ Just False
+      1 -> pure $ Just True
+      _ -> pure $ Nothing
+
+instance (ToPy a, ToPy b) => ToPy (a,b) where
+  basicToPy (a,b) = do
+    basicToPy a >>= \case
+      NULL -> pure NULL
+      p_a  -> basicToPy b >>= \case
+        NULL -> pure $ NULL
+        p_b  -> Py [CU.exp| PyObject* { PyTuple_Pack(2, $(PyObject* p_a), $(PyObject* p_b)) } |]
+
+instance (FromPy a, FromPy b) => FromPy (a,b) where
+  basicFromPy p_tup = evalContT $ do
+    -- Unpack 2-tuple.
+    p_args    <- withPyAllocaArray 2
+    unpack_ok <- liftIO [CU.exp| int {
+      inline_py_unpack_iterable($(PyObject *p_tup), 2, $(PyObject **p_args))
+      }|]
+    -- We may want to extract exception to haskell side later
+    liftIO [CU.exp| void { PyErr_Clear() } |]
+    when (unpack_ok /= 0) $ abort $ pure Nothing
+    -- Unpack 2-elements
+    lift $ do
+      p_a <- liftIO $ peekElemOff p_args 0
+      p_b <- liftIO $ peekElemOff p_args 1
+      let parse = basicFromPy p_a >>= \case
+            Nothing -> pure Nothing
+            Just a  -> basicFromPy p_b >>= \case
+              Nothing -> pure Nothing
+              Just b  -> pure $ Just (a,b)
+          fini  = liftIO [CU.block| void {
+            Py_XDECREF( $(PyObject* p_a) );
+            Py_XDECREF( $(PyObject* p_b) );
+            } |]
+      parse `finallyPy` fini
+
 
 
 ----------------------------------------------------------------

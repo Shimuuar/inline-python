@@ -10,6 +10,8 @@
 #define INLINE_PY_ERR_COMPILE 1
 #define INLINE_PY_ERR_EVAL    2
 
+
+
 // This macro checks for errors. If python exception is raised it
 // clear it and returns 1 otherwise retruns 0
 #define INLINE_PY_SIMPLE_ERROR_HANDLING() do {      \
@@ -27,6 +29,20 @@ void inline_py_export_exception(
     PyObject *e_value,
     PyObject *e_trace,
     char** p_msg
+    );
+
+// Unpack iterable into array of PyObjects. Iterable must contain
+// exactly N elements.
+//
+// On success returns 0 and fills `out` with N PyObjects
+//
+// On failure returns -1. Python exception is not cleared. It's
+// responsibility of caller to deal with it. Content of `out` is
+// undefined in this case.
+int inline_py_unpack_iterable(
+    PyObject  *iterable,
+    int        n,
+    PyObject **out
     );
 
 // Allocate python function object which carrries its own PyMethodDef.

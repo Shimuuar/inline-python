@@ -10,17 +10,21 @@ module Python.Internal.Types
     PyObject(..)
   , PyError(..)
   , Py(..)
+  , finallyPy
     -- * inline-C
   , pyCtx
     -- * Patterns
   , pattern INLINE_PY_OK
   , pattern INLINE_PY_ERR_COMPILE
   , pattern INLINE_PY_ERR_EVAL
+  , pattern NULL
   ) where
 
 import Control.Exception
 import Control.Monad.IO.Class
+import Data.Coerce
 import Data.Map.Strict           qualified as Map
+import Foreign.Ptr
 import Foreign.ForeignPtr
 import Foreign.C.Types
 import Language.C.Types
@@ -50,6 +54,8 @@ newtype Py a = Py (IO a)
   deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail)
 -- See NOTE: [Python and threading]
 
+finallyPy :: forall a b. Py a -> Py b -> Py a
+finallyPy = coerce (finally @a @b)
 
 ----------------------------------------------------------------
 -- inline-C
@@ -67,3 +73,8 @@ pattern INLINE_PY_OK, INLINE_PY_ERR_COMPILE, INLINE_PY_ERR_EVAL :: CInt
 pattern INLINE_PY_OK          = 0
 pattern INLINE_PY_ERR_COMPILE = 1
 pattern INLINE_PY_ERR_EVAL    = 2
+
+
+pattern NULL :: Ptr a
+pattern NULL <- ((== nullPtr) -> True) where
+  NULL = nullPtr
