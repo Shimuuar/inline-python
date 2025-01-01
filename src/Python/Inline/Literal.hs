@@ -167,9 +167,11 @@ instance FromPy Bool where
 
 instance (ToPy a, ToPy b) => ToPy (a,b) where
   basicToPy (a,b) = do
-    p_a <- basicToPy a
-    p_b <- basicToPy b
-    Py [CU.exp| PyObject* { PyTuple_Pack(2, $(PyObject* p_a), $(PyObject* p_b)) } |]
+    basicToPy a >>= \case
+      NULL -> pure NULL
+      p_a  -> basicToPy b >>= \case
+        NULL -> pure $ NULL
+        p_b  -> Py [CU.exp| PyObject* { PyTuple_Pack(2, $(PyObject* p_a), $(PyObject* p_b)) } |]
 
 instance (FromPy a, FromPy b) => FromPy (a,b) where
   basicFromPy p_tup = evalContT $ do
