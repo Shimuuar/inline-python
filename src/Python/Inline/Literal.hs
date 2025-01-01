@@ -143,6 +143,20 @@ instance ToPy Int where
 instance FromPy Int where
   basicFromPy = (fmap . fmap) fromIntegral . basicFromPy @Int64
 
+-- TODO: Int may be 32 or 64 bit!
+-- TODO: Int{8,16,32} & Word{8,16,32}
+
+instance ToPy Bool where
+  basicToPy True  = Py [CU.exp| PyObject* { Py_True  } |]
+  basicToPy False = Py [CU.exp| PyObject* { Py_False } |]
+
+-- | Uses python's truthiness conventions
+instance FromPy Bool where
+  basicFromPy p = Py $ do
+    r <- [CU.exp| int { Py_IsTrue($(PyObject* p)) } |]
+    case r of
+      0 -> pure $ Just False
+      _ -> pure $ Just True
 
 ----------------------------------------------------------------
 -- Functions marshalling
