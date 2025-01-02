@@ -65,7 +65,7 @@ pyEvalInMain p_globals p_locals src = evalContT $ do
     if( code == 0 ){
         PyErr_Fetch( &e_type, &e_value, &e_trace);
         inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
-        return INLINE_PY_ERR_COMPILE;
+        return IPY_ERR_COMPILE;
     }
     // Execute in context of main
     PyObject* globals = $(PyObject* p_globals);
@@ -75,9 +75,9 @@ pyEvalInMain p_globals p_locals src = evalContT $ do
     if( PyErr_Occurred() ) {
         PyErr_Fetch( &e_type, &e_value, &e_trace);
         inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
-        return INLINE_PY_ERR_EVAL;
+        return IPY_ERR_PYTHON;
     }
-    return INLINE_PY_OK;
+    return IPY_OK;
     } |]
   lift $ finiEval p_err r (pure ())
 
@@ -98,7 +98,7 @@ pyEvalExpr p_env src = evalContT $ do
        if( code == 0 ){
            PyErr_Fetch( &e_type, &e_value, &e_trace);
            inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
-           return INLINE_PY_ERR_COMPILE;
+           return IPY_ERR_COMPILE;
        }
        // Execute in context of main
        PyObject* main_module = PyImport_AddModule("__main__");
@@ -109,10 +109,10 @@ pyEvalExpr p_env src = evalContT $ do
        if( PyErr_Occurred() ) {
            PyErr_Fetch( &e_type, &e_value, &e_trace);
            inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
-           return INLINE_PY_ERR_EVAL;
+           return IPY_ERR_PYTHON;
        }
        Py_INCREF(r);
-       return INLINE_PY_OK;
+       return IPY_OK;
        }|]
   lift $ finiEval p_err r (newPyObject =<< liftIO (peek p_res))
 
@@ -123,14 +123,14 @@ finiEval
   -> Py a
   -> Py a
 finiEval p_err r fini = case r of
-  INLINE_PY_OK          -> fini
-  INLINE_PY_ERR_COMPILE -> Py $ peek p_err >>= \case
+  IPY_OK          -> fini
+  IPY_ERR_COMPILE -> Py $ peek p_err >>= \case
     p | nullPtr == p -> throwIO $ PyError "Compile error"
       | otherwise    -> do
           s <- peekCString p
           free p
           throwIO $ PyError s
-  INLINE_PY_ERR_EVAL   -> Py $ peek p_err >>= \case
+  IPY_ERR_PYTHON -> Py $ peek p_err >>= \case
       p | nullPtr == p -> throwIO $ PyError "Evaluation error"
         | otherwise    -> do
             s <- peekCString p

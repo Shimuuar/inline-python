@@ -14,9 +14,9 @@ module Python.Internal.Types
     -- * inline-C
   , pyCtx
     -- * Patterns
-  , pattern INLINE_PY_OK
-  , pattern INLINE_PY_ERR_COMPILE
-  , pattern INLINE_PY_ERR_EVAL
+  , pattern IPY_OK
+  , pattern IPY_ERR_COMPILE
+  , pattern IPY_ERR_PYTHON
   , pattern NULL
   ) where
 
@@ -69,10 +69,14 @@ pyCtx = mempty { ctxTypesTable = Map.fromList tytabs } where
     ]
 
 
-pattern INLINE_PY_OK, INLINE_PY_ERR_COMPILE, INLINE_PY_ERR_EVAL :: CInt
-pattern INLINE_PY_OK          = 0
-pattern INLINE_PY_ERR_COMPILE = 1
-pattern INLINE_PY_ERR_EVAL    = 2
+pattern IPY_OK, IPY_ERR_PYTHON, IPY_ERR_COMPILE :: CInt
+-- | Success
+pattern IPY_OK          = 0
+-- | Python exception raised
+pattern IPY_ERR_PYTHON  = 1
+-- | Error while compiling python source to byte code. Normally it
+--   shouldn't happen.
+pattern IPY_ERR_COMPILE = 2
 
 
 pattern NULL :: Ptr a

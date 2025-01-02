@@ -5,12 +5,14 @@
 #include <Rts.h>
 
 
-// Standard status codesu
-#define INLINE_PY_OK          0
-#define INLINE_PY_ERR_COMPILE 1
-#define INLINE_PY_ERR_EVAL    2
+// ----------------------------------------------------------------
+// Standard status codes
 
+#define IPY_OK          0
+#define IPY_ERR_PYTHON  1
+#define IPY_ERR_COMPILE 2
 
+// ----------------------------------------------------------------
 
 // This macro checks for errors. If python exception is raised it
 // clear it and returns 1 otherwise retruns 0
