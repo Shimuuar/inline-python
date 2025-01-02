@@ -19,6 +19,7 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.Cont
 import Data.Int
 import Data.Word
+import Data.Foldable
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Marshal.Alloc
@@ -175,6 +176,15 @@ instance (FromPy a, FromPy b) => FromPy (a,b) where
               b <- basicFromPy p_b
               pure (a,b)
 
+instance (ToPy a) => ToPy [a] where
+  basicToPy xs = evalContT $ do
+    let n = fromIntegral $ length xs :: CLLong
+    p_list <- liftIO [CU.exp| PyObject* { PyList_New($(long long n)) } |]
+    onExceptionProg $ decref p_list
+    lift $ for_ ([0..] `zip` xs) $ \(i,a) -> do
+      p_a <- basicToPy a
+      Py [CU.exp| void { PyList_SET_ITEM($(PyObject* p_list), $(long long i), $(PyObject* p_a)) } |]
+    pure p_list
 
 
 ----------------------------------------------------------------

@@ -1,0 +1,21 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE QuasiQuotes         #-}
+-- |
+module TST.ToPy (tests) where
+
+import Test.Tasty
+import Test.Tasty.HUnit
+import Python.Inline
+import Python.Inline.QQ
+
+tests :: TestTree
+tests = testGroup "ToPy"
+  [ testCase "Int"    $ let i = 1234    :: Int    in [py_| assert i_hs == 1234    |]
+  , testCase "Double" $ let i = 1234.25 :: Double in [py_| assert i_hs == 1234.25 |]
+  , testCase "Tuple2" $ let x = (1::Int, 333::Int)
+                        in [py_| assert x_hs == (1,333) |]
+  , testCase "nested Tuple2" $ let x = (1::Int, (333::Int,4.5::Double))
+                               in [py_| assert x_hs == (1,(333,4.5)) |]
+  , testCase "list" $ let x = [1 .. 5::Int]
+                      in [py_| assert x_hs == [1,2,3,4,5] |]
+  ]
