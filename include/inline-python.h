@@ -25,13 +25,6 @@
     return 0;                                       \
 } while(0)
 
-// Convert python exception into form suitable for haskell
-void inline_py_export_exception(
-    PyObject *e_type,
-    PyObject *e_value,
-    PyObject *e_trace,
-    char** p_msg
-    );
 
 // Unpack iterable into array of PyObjects. Iterable must contain
 // exactly N elements.

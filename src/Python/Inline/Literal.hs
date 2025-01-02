@@ -10,7 +10,6 @@ module Python.Inline.Literal
   , fromPy
   ) where
 
-import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
@@ -19,7 +18,6 @@ import Data.Int
 import Data.Word
 import Foreign.Ptr
 import Foreign.C.Types
-import Foreign.C.String
 import Foreign.Marshal.Alloc
 import Foreign.Storable
 
@@ -29,6 +27,7 @@ import Language.C.Inline.Unsafe  qualified as CU
 import Python.Types
 import Python.Internal.Types
 import Python.Internal.Eval
+
 import Python.Internal.Program
 
 ----------------------------------------------------------------
@@ -293,15 +292,7 @@ raiseBadNArgs tot n = Py [CU.block| PyObject* {
   } |]
 
 pyProg :: Program (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
-pyProg io = unPy $ evalContT io `catchPy` convertHaskellException
-
-convertHaskellException :: SomeException -> Py (Ptr PyObject)
-convertHaskellException err = Py $ do
-  withCString ("Haskell exception: "++show err) $ \p_err -> do
-    [CU.block| PyObject* {
-      PyErr_SetString(PyExc_RuntimeError, $(char *p_err));
-      return NULL;
-      } |]
+pyProg io = unPy $ evalContT io `catchPy` convertHaskell2Py
 
 
 type FunWrapper a = a -> IO (FunPtr a)

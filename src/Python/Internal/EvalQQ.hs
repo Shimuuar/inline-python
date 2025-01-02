@@ -57,14 +57,9 @@ pyEvalInMain
   -> Py ()
 pyEvalInMain p_globals p_locals src = evalContT $ do
   p_py  <- withPyCString src
-  p_err <- withPyAlloca @(Ptr CChar)
   r     <- liftIO [C.block| int {
-    PyObject *e_type, *e_value, *e_trace;
-    // Compile code
     PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_file_input);
-    if( code == 0 ){
-        PyErr_Fetch( &e_type, &e_value, &e_trace);
-        inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
+    if( PyErr_Occurred() ){
         return IPY_ERR_COMPILE;
     }
     // Execute in context of main
@@ -73,13 +68,11 @@ pyEvalInMain p_globals p_locals src = evalContT $ do
     PyObject* r = PyEval_EvalCode(code, globals, locals);
     Py_XDECREF(r);
     if( PyErr_Occurred() ) {
-        PyErr_Fetch( &e_type, &e_value, &e_trace);
-        inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
         return IPY_ERR_PYTHON;
     }
     return IPY_OK;
     } |]
-  lift $ finiEval p_err r (pure ())
+  lift $ finiEval r (pure ())
 
 -- | Evaluate expression with fresh local environment
 pyEvalExpr
@@ -88,54 +81,42 @@ pyEvalExpr
   -> Py PyObject
 pyEvalExpr p_env src = evalContT $ do
   p_py  <- withPyCString src
-  p_err <- withPyAlloca @(Ptr CChar)
   p_res <- withPyAlloca @(Ptr PyObject)
-  r <- liftIO
-    [C.block| int {
-       PyObject *e_type, *e_value, *e_trace;
-       // Compile code
-       PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_eval_input);
-       if( code == 0 ){
-           PyErr_Fetch( &e_type, &e_value, &e_trace);
-           inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
-           return IPY_ERR_COMPILE;
-       }
-       // Execute in context of main
-       PyObject* main_module = PyImport_AddModule("__main__");
-       PyObject* globals     = PyModule_GetDict(main_module);
-       //
-       PyObject* r = PyEval_EvalCode(code, globals, $(PyObject* p_env));
-       *$(PyObject** p_res) = r;
-       if( PyErr_Occurred() ) {
-           PyErr_Fetch( &e_type, &e_value, &e_trace);
-           inline_py_export_exception(e_type, e_value, e_trace, $(char** p_err));
-           return IPY_ERR_PYTHON;
-       }
-       Py_INCREF(r);
-       return IPY_OK;
-       }|]
-  lift $ finiEval p_err r (newPyObject =<< liftIO (peek p_res))
+  r     <- liftIO [C.block| int {
+    // Compile code
+    PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_eval_input);
+    if( PyErr_Occurred() ) {
+        return IPY_ERR_COMPILE;
+    }
+    // Execute in context of main
+    PyObject* main_module = PyImport_AddModule("__main__");
+    if( PyErr_Occurred() ) {
+        return IPY_ERR_PYTHON;
+    }
+    PyObject* globals     = PyModule_GetDict(main_module);
+    if( PyErr_Occurred() ) {
+        return IPY_ERR_PYTHON;
+    }
+    //
+    PyObject* r = PyEval_EvalCode(code, globals, $(PyObject* p_env));
+    if( PyErr_Occurred() ) {
+        return IPY_ERR_PYTHON;
+    }
+    Py_INCREF(r);
+    *$(PyObject **p_res) = r;
+    return IPY_OK;
+    }|]
+  lift $ finiEval r (newPyObject =<< liftIO (peek p_res))
 
 -- | Convert evaluation result and
 finiEval
-  :: Ptr CString
-  -> CInt
+  :: CInt
   -> Py a
   -> Py a
-finiEval p_err r fini = case r of
+finiEval r fini = case r of
   IPY_OK          -> fini
-  IPY_ERR_COMPILE -> Py $ peek p_err >>= \case
-    p | nullPtr == p -> throwIO $ PyError "Compile error"
-      | otherwise    -> do
-          s <- peekCString p
-          free p
-          throwIO $ PyError s
-  IPY_ERR_PYTHON -> Py $ peek p_err >>= \case
-      p | nullPtr == p -> throwIO $ PyError "Evaluation error"
-        | otherwise    -> do
-            s <- peekCString p
-            free p
-            throwIO $ PyError s
+  IPY_ERR_COMPILE -> throwPy =<< convertPy2Haskell
+  IPY_ERR_PYTHON  -> throwPy =<< convertPy2Haskell
   _ -> error $ "pyEvalStr: unexpected error: " ++ show r
 
 basicBindInDict :: ToPy a => String -> a -> Ptr PyObject -> Py ()
@@ -212,4 +193,3 @@ unindent py = case ls of
   where
     n  = minimum [ length (takeWhile (==' ') s) | s <- ls ]
     ls = filter (any (not . isSpace)) $ lines py
-

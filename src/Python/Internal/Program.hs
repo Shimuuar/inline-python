@@ -9,6 +9,7 @@ module Python.Internal.Program
   , withPyCStringLen
   ) where
 
+import Control.Exception
 import Control.Monad.Trans.Cont
 import Data.Coerce
 import Foreign.Ptr

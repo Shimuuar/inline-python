@@ -12,6 +12,8 @@ module Python.Internal.Types
   , Py(..)
   , finallyPy
   , catchPy
+  , maskPy_
+  , throwPy
     -- * inline-C
   , pyCtx
     -- * Patterns
@@ -60,6 +62,12 @@ catchPy = coerce (catch @e @a)
 
 finallyPy :: forall a b. Py a -> Py b -> Py a
 finallyPy = coerce (finally @a @b)
+
+maskPy_ :: forall a. Py a -> Py a
+maskPy_ = coerce (mask_ @a)
+
+throwPy :: Exception e => e -> Py a
+throwPy = Py . throwIO
 
 ----------------------------------------------------------------
 -- inline-C
