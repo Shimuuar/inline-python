@@ -42,6 +42,13 @@ tests = testGroup "FromPy"
     , testCase "(3)->2" $ eq @(Int,Bool) Nothing =<< [pye| (1,2,3) |]
     , testCase "X->2"   $ eq @(Int,Bool) Nothing =<< [pye| 2 |]
     ]
+  , testGroup "List"
+    [ testCase "()"  $ eq @[Int] (Just [])      =<< [pye| ()      |]
+    , testCase "[]"  $ eq @[Int] (Just [])      =<< [pye| []      |]
+    , testCase "[1]" $ eq @[Int] (Just [1])     =<< [pye| [1]     |]
+    , testCase "[3]" $ eq @[Int] (Just [1,2,3]) =<< [pye| [1,2,3] |]
+    , testCase "Int" $ eq @[Int] Nothing        =<< [pye| None    |]
+    ]
   ]
 
 eq :: (Eq a, Show a, FromPy a) => Maybe a -> PyObject -> IO ()

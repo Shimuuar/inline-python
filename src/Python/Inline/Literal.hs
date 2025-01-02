@@ -186,6 +186,26 @@ instance (ToPy a) => ToPy [a] where
       Py [CU.exp| void { PyList_SET_ITEM($(PyObject* p_list), $(long long i), $(PyObject* p_a)) } |]
     pure p_list
 
+instance (FromPy a) => FromPy [a] where
+  basicFromPy p_list = do
+    p_iter <- Py [CU.block| PyObject* {
+      PyObject* iter = PyObject_GetIter( $(PyObject *p_list) );
+      if( PyErr_Occurred() ) {
+          PyErr_Clear();
+      }
+      return iter;
+      } |]
+    when (nullPtr == p_iter) $ throwPy FromPyFailed
+    --
+    let loop f = do
+          p <- Py [C.exp| PyObject* { PyIter_Next($(PyObject* p_iter)) } |]
+          throwPyError
+          case p of
+            NULL -> pure f
+            _    -> do a <- basicFromPy p `finallyPy` decref p
+                       loop (f . (a:))
+    ($ []) <$> loop id
+
 
 ----------------------------------------------------------------
 -- Functions marshalling
