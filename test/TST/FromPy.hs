@@ -20,11 +20,22 @@ tests = testGroup "FromPy"
     , testCase "Double->Double" $ eq @Double (Just 1234.25) =<< [pye| 1234.25 |]
     , testCase "None->Double"   $ eq @Double Nothing        =<< [pye| None    |]
     ]
+  , testGroup "Char"
+    [ testCase "0"    $ eq @Char Nothing    =<< [pye| ""   |]
+    , testCase "1 1B" $ eq @Char (Just 'a') =<< [pye| "a"  |]
+    , testCase "2 2B" $ eq @Char (Just 'ы') =<< [pye| "ы"  |]
+    , testCase "2"    $ eq @Char Nothing    =<< [pye| "as" |]
+    , testCase "None" $ eq @Char Nothing    =<< [pye| None |]
+    ]
+  , testGroup "String"
+    [ testCase "asdf" $ eq @String (Just "asdf") =<< [pye| "asdf" |]
+    , testCase "фыва" $ eq @String (Just "фыва") =<< [pye| "фыва" |]
+    ]
   , testGroup "Bool"
     [ testCase "True->Bool"  $ eq @Bool (Just True)  =<< [pye| True  |]
     , testCase "False->Bool" $ eq @Bool (Just False) =<< [pye| False |]
     , testCase "None->Bool"  $ eq @Bool (Just False) =<< [pye| None  |]
-      -- FIXME: Names leak!
+      -- FIXME: Names defined in pymain leak!
     , testCase "Exception" $ do
         [pymain|
                class Bad:

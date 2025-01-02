@@ -17,6 +17,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Cont
+import Data.Char
 import Data.Int
 import Data.Word
 import Data.Foldable
@@ -136,6 +137,37 @@ instance FromPy Int where
 
 -- -- TODO: Int may be 32 or 64 bit!
 -- -- TODO: Int{8,16,32} & Word{8,16,32}
+
+-- | Encoded as 1-character string
+instance ToPy Char where
+  basicToPy c = do
+    let i = fromIntegral (ord c) :: CUInt
+    r <- Py [CU.block| PyObject* {
+       uint32_t cs[1] = { $(unsigned i) };
+       return PyUnicode_DecodeUTF32((char*)cs, 4, NULL, NULL);
+       } |]
+    r <$ throwPyError
+
+instance FromPy Char where
+  basicFromPy p = do
+    r <- Py [CU.block| int {
+      PyObject* p = $(PyObject *p);
+      if( !PyUnicode_Check(p) )
+          return -1;
+      if( 1 != PyUnicode_GET_LENGTH(p) )
+          return -1;
+      switch( PyUnicode_KIND(p) ) {
+      case PyUnicode_1BYTE_KIND:
+          return PyUnicode_1BYTE_DATA(p)[0];
+      case PyUnicode_2BYTE_KIND:
+          return PyUnicode_2BYTE_DATA(p)[0];
+      case PyUnicode_4BYTE_KIND:
+          return PyUnicode_4BYTE_DATA(p)[0];
+      }
+      return -1;
+      } |]
+    if | r < 0     -> throwPy FromPyFailed
+       | otherwise -> pure $ chr $ fromIntegral r
 
 instance ToPy Bool where
   basicToPy True  = Py [CU.exp| PyObject* { Py_True  } |]

@@ -38,6 +38,7 @@ common language
     PatternSynonyms
     ViewPatterns
     LambdaCase
+    MultiWayIf
     --
     NoFieldSelectors
     DuplicateRecordFields
