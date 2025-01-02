@@ -11,6 +11,7 @@ module Python.Internal.Program
   , withPyAllocaArray
   , withPyCString
   , withPyCStringLen
+  , withPyWCString
   ) where
 
 import Control.Exception
@@ -20,9 +21,11 @@ import Foreign.Ptr
 import Foreign.Marshal.Array
 import Foreign.Marshal
 import Foreign.C.String
+import Foreign.C.Types
 import Foreign.Storable
 
 import Python.Internal.Types
+import Python.Internal.Util
 
 
 -- | Internally we usually wrap 'Py' into 'ContT' in order get early
@@ -63,6 +66,9 @@ withPyAllocaArray = coerce (allocaArray @a @r)
 
 withPyCString :: forall r. String -> Program r CString
 withPyCString = coerce (withCString @r)
+
+withPyWCString :: forall r. String -> Program r (Ptr CWchar)
+withPyWCString = coerce (withWCString @r)
 
 withPyCStringLen :: forall r. String -> Program r CStringLen
 withPyCStringLen = coerce (withCStringLen @r)

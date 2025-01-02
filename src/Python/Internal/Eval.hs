@@ -257,8 +257,8 @@ doInializePython = do
   -- FIXME: For some reason sys.argv is initialized incorrectly. No
   --        easy way to debug. Will do for now
   r <- evalContT $ do
-    p_argv0  <- ContT $ withWCtring argv0
-    p_argv   <- traverse (ContT . withWCtring) argv
+    p_argv0  <- ContT $ withWCString argv0
+    p_argv   <- traverse (ContT . withWCString) argv
     ptr_argv <- ContT $ withArray (p_argv0 : p_argv)
     liftIO [C.block| int {
       // Noop is interpreter is already initialized

@@ -51,6 +51,16 @@ class ToPy a where
   --   This is low level function. It should be only used when working
   --   with python's C API. Otherwise 'toPy' is preferred.
   basicToPy :: a -> Py (Ptr PyObject)
+  -- | Old hack for handling of strings
+  basicListToPy :: [a] -> Py (Ptr PyObject)
+  basicListToPy xs = evalContT $ do
+    let n = fromIntegral $ length xs :: CLLong
+    p_list <- liftIO [CU.exp| PyObject* { PyList_New($(long long n)) } |]
+    onExceptionProg $ decref p_list
+    lift $ for_ ([0..] `zip` xs) $ \(i,a) -> do
+      p_a <- basicToPy a
+      Py [CU.exp| void { PyList_SET_ITEM($(PyObject* p_list), $(long long i), $(PyObject* p_a)) } |]
+    pure p_list
 
 -- | Convert python object to haskell value.
 class FromPy a where
@@ -147,6 +157,11 @@ instance ToPy Char where
        return PyUnicode_DecodeUTF32((char*)cs, 4, NULL, NULL);
        } |]
     r <$ throwPyError
+  basicListToPy str = evalContT $ do
+    p_str <- withPyWCString str
+    p     <- liftIO [CU.exp| PyObject* { PyUnicode_FromWideChar($(wchar_t *p_str), -1) } |]
+    lift $ p <$ throwPyError
+
 
 instance FromPy Char where
   basicFromPy p = do
@@ -209,14 +224,7 @@ instance (FromPy a, FromPy b) => FromPy (a,b) where
               pure (a,b)
 
 instance (ToPy a) => ToPy [a] where
-  basicToPy xs = evalContT $ do
-    let n = fromIntegral $ length xs :: CLLong
-    p_list <- liftIO [CU.exp| PyObject* { PyList_New($(long long n)) } |]
-    onExceptionProg $ decref p_list
-    lift $ for_ ([0..] `zip` xs) $ \(i,a) -> do
-      p_a <- basicToPy a
-      Py [CU.exp| void { PyList_SET_ITEM($(PyObject* p_list), $(long long i), $(PyObject* p_a)) } |]
-    pure p_list
+  basicToPy = basicListToPy
 
 instance (FromPy a) => FromPy [a] where
   basicFromPy p_list = do
