@@ -10,13 +10,17 @@ module Python.Internal.Types
     PyObject(..)
   , PyError(..)
   , Py(..)
+  , catchPy
   , finallyPy
+  , onExceptionPy
+  , throwPy
+  , tryPy
     -- * inline-C
   , pyCtx
     -- * Patterns
-  , pattern INLINE_PY_OK
-  , pattern INLINE_PY_ERR_COMPILE
-  , pattern INLINE_PY_ERR_EVAL
+  , pattern IPY_OK
+  , pattern IPY_ERR_COMPILE
+  , pattern IPY_ERR_PYTHON
   , pattern NULL
   ) where
 
@@ -40,22 +44,42 @@ import Language.C.Inline.Context
 newtype PyObject = PyObject (ForeignPtr PyObject)
 
 -- | Python exception converted to haskell
-data PyError = PyError String
+data PyError
+  = PyError String
+    -- ^ Python exception
+  | FromPyFailed
+    -- ^ Conversion
   deriving stock (Show)
 
 instance Exception PyError
 
 
 -- | Monad for code which is interacts directly with python
---   interpreter. It's needed because in multithreaded runtime one
---   can't call python's C function from any thread. We need to send
---   it for execution on designated OS thread. 
+--   interpreter. One could assume that code in this monad executes
+--   with async exceptions masked.
+--
+--   We need to treat code interacting with python interpreter
+--   differently from plain @IO@ since it must be executed in single OS
+--   threads. On other hand lifting @IO@ to @Py@ is safe.
 newtype Py a = Py (IO a)
   deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail)
 -- See NOTE: [Python and threading]
+-- See NOTE: [Async exceptions]
+
+catchPy :: forall e a. Exception e => Py a -> (e -> Py a) -> Py a
+catchPy = coerce (catch @e @a)
 
 finallyPy :: forall a b. Py a -> Py b -> Py a
 finallyPy = coerce (finally @a @b)
+
+onExceptionPy :: forall a b. Py a -> Py b -> Py a
+onExceptionPy = coerce (onException @a @b)
+
+throwPy :: Exception e => e -> Py a
+throwPy = Py . throwIO
+
+tryPy :: forall e a. Exception e => Py a -> Py (Either e a)
+tryPy = coerce (try @e @a)
 
 ----------------------------------------------------------------
 -- inline-C
@@ -69,10 +93,18 @@ pyCtx = mempty { ctxTypesTable = Map.fromList tytabs } where
     ]
 
 
-pattern INLINE_PY_OK, INLINE_PY_ERR_COMPILE, INLINE_PY_ERR_EVAL :: CInt
-pattern INLINE_PY_OK          = 0
-pattern INLINE_PY_ERR_COMPILE = 1
-pattern INLINE_PY_ERR_EVAL    = 2
+----------------------------------------------------------------
+-- Patterns
+----------------------------------------------------------------
+
+pattern IPY_OK, IPY_ERR_PYTHON, IPY_ERR_COMPILE :: CInt
+-- | Success
+pattern IPY_OK          = 0
+-- | Python exception raised
+pattern IPY_ERR_PYTHON  = 1
+-- | Error while compiling python source to byte code. Normally it
+--   shouldn't happen.
+pattern IPY_ERR_COMPILE = 2
 
 
 pattern NULL :: Ptr a

@@ -38,6 +38,7 @@ common language
     PatternSynonyms
     ViewPatterns
     LambdaCase
+    MultiWayIf
     --
     NoFieldSelectors
     DuplicateRecordFields
@@ -66,10 +67,11 @@ Library
     Python.Inline
     Python.Types
   Other-modules:
-    Python.Internal.Types
-    Python.Internal.Util
     Python.Internal.Eval
     Python.Internal.EvalQQ
+    Python.Internal.Program
+    Python.Internal.Types
+    Python.Internal.Util
     Paths_inline_python
   Autogen-modules:
     Paths_inline_python
@@ -84,6 +86,7 @@ library test
   hs-source-dirs:   test
   Exposed-modules:
     TST.Run
+    TST.ToPy
     TST.FromPy
 
 test-suite inline-python-tests

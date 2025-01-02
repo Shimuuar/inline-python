@@ -5,40 +5,23 @@
 #include <Rts.h>
 
 
-// Standard status codesu
-#define INLINE_PY_OK          0
-#define INLINE_PY_ERR_COMPILE 1
-#define INLINE_PY_ERR_EVAL    2
+// ----------------------------------------------------------------
+// Standard status codes
 
+#define IPY_OK          0
+#define IPY_ERR_PYTHON  1
+#define IPY_ERR_COMPILE 2
 
-
-// This macro checks for errors. If python exception is raised it
-// clear it and returns 1 otherwise retruns 0
-#define INLINE_PY_SIMPLE_ERROR_HANDLING() do {      \
-    if( PyErr_Occurred() ) {                        \
-          PyObject *e_type, *e_value, *e_trace;     \
-          PyErr_Fetch(&e_type, &e_value, &e_trace); \
-          return 1;                                 \
-    }                                               \
-    return 0;                                       \
-} while(0)
-
-// Convert python exception into form suitable for haskell
-void inline_py_export_exception(
-    PyObject *e_type,
-    PyObject *e_value,
-    PyObject *e_trace,
-    char** p_msg
-    );
+// ----------------------------------------------------------------
 
 // Unpack iterable into array of PyObjects. Iterable must contain
 // exactly N elements.
 //
 // On success returns 0 and fills `out` with N PyObjects
 //
-// On failure returns -1. Python exception is not cleared. It's
-// responsibility of caller to deal with it. Content of `out` is
-// undefined in this case.
+// On failure return -1. Content of out is then undefined and it
+// doesn't contain live python objects. If failure is due to python
+// exception it's not cleared.
 int inline_py_unpack_iterable(
     PyObject  *iterable,
     int        n,

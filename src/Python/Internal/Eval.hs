@@ -14,6 +14,12 @@ module Python.Internal.Eval
   , withPython
     -- * PyObject wrapper
   , newPyObject
+  , decref
+    -- * Exceptions
+  , convertHaskell2Py
+  , convertPy2Haskell
+  , throwPyError
+  , throwPyConvesionFailed
   ) where
 
 import Control.Concurrent
@@ -25,7 +31,10 @@ import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
 import Foreign.C.Types
+import Foreign.C.String
 import Foreign.Marshal.Array
+import Foreign.Marshal
+import Foreign.Storable
 import System.Environment
 import System.IO.Unsafe
 
@@ -34,6 +43,7 @@ import Language.C.Inline.Unsafe   qualified as CU
 
 import Python.Internal.Types
 import Python.Internal.Util
+import Python.Internal.Program
 
 ----------------------------------------------------------------
 C.context (C.baseCtx <> pyCtx)
@@ -106,6 +116,23 @@ C.include "<inline-python.h>"
 
 
 
+-- NOTE: [Async exceptions]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- Code interacting with python interpreter interleaves C calls and
+-- haskell code. It's impossible to ensure invariant that python
+-- interpreter demands from us if computation could be interrupted in
+-- arbitrary points.
+--
+-- So solution is to execute such code with async exceptions masked.
+-- `runPy` and friends should ensure that.
+--
+-- This may cause problems with callbacks to haskell. Async exceptions
+-- won't reach worker thread, and python interpreter couldn't be
+-- interrupted as well. We poll for that at beginning of callback.
+-- We'll see whether it causes problems in practice.
+
+
 
 ----------------------------------------------------------------
 -- Data types used for multithreaded RTS
@@ -155,6 +182,8 @@ toDECREF = unsafePerformIO $ newMVar Nil
 
 -- | Execute python action.
 runPy :: Py a -> IO a
+-- See NOTE: [Python and threading]
+-- See NOTE: [Threading and exceptions]
 runPy py
   -- Multithreaded RTS
   | rtsSupportsBoundThreads = do
@@ -174,9 +203,9 @@ runPy py
             Right a -> pure a
         ) `catch` onExc
   -- Single-threaded RTS
-  | otherwise = unPy py
--- See NOTE: [Python and threading]
--- See NOTE: [Threading and exceptions]
+  --
+  -- See NOTE: [Async exceptions]
+  | otherwise = mask_ $ unPy py
 
 
 -- | Execute python action. This function is unsafe and should be only
@@ -228,8 +257,8 @@ doInializePython = do
   -- FIXME: For some reason sys.argv is initialized incorrectly. No
   --        easy way to debug. Will do for now
   r <- evalContT $ do
-    p_argv0  <- ContT $ withWCtring argv0
-    p_argv   <- traverse (ContT . withWCtring) argv
+    p_argv0  <- ContT $ withWCString argv0
+    p_argv   <- traverse (ContT . withWCString) argv
     ptr_argv <- ContT $ withArray (p_argv0 : p_argv)
     liftIO [C.block| int {
       // Noop is interpreter is already initialized
@@ -240,20 +269,27 @@ doInializePython = do
       PyStatus status;
       PyConfig cfg;
       PyConfig_InitPythonConfig( &cfg );
-      //--
-      status = PyConfig_SetBytesString(&cfg, &cfg.program_name, "XX");
-      if (PyStatus_Exception(status)) { goto error; }
       cfg.parse_argv = 0;
-      //--
+      //----------------
+      status = PyConfig_SetBytesString(&cfg, &cfg.program_name, "XX");
+      if( PyStatus_Exception(status) ) {
+          goto error;
+      }
+      //----------------
       status = PyConfig_SetArgv(&cfg,
           $(int       n_argv),
           $(wchar_t** ptr_argv)
       );
-      if( PyStatus_Exception(status) ) { goto error; };
+      if( PyStatus_Exception(status) ) {
+          goto error;
+      };
       // Initialize interpreter
       status = Py_InitializeFromConfig(&cfg);
+      if( PyStatus_Exception(status) ) {
+          goto error;
+      };
       PyConfig_Clear(&cfg);
-      return PyStatus_Exception(status);
+      return 0;
       // Error case
       error:
       PyConfig_Clear(&cfg);
@@ -277,10 +313,10 @@ evalReq :: IO ()
 evalReq = do
   PyEvalReq{prog=Py io, result, status} <- takeMVar toPythonThread
   -- GC
-  let decref Nil = pure ()
-      decref (p `Cons` ps) = do [CU.exp| void { Py_XDECREF($(PyObject* p)) } |]
-                                decref ps
-  decref =<< modifyMVar toDECREF (\xs -> pure (Nil, xs))
+  let decrefList Nil = pure ()
+      decrefList (p `Cons` ps) = do [CU.exp| void { Py_XDECREF($(PyObject* p)) } |]
+                                    decrefList ps
+  decrefList =<< modifyMVar toDECREF (\xs -> pure (Nil, xs))
   -- Update status of request
   do_eval <- modifyMVar status $ \case
     Running   -> error "Python evaluator: Internal error. Got 'Running' request"
@@ -288,7 +324,7 @@ evalReq = do
     Cancelled -> return (Cancelled,False)
     Pending   -> return (Running,  True)
   when do_eval $ do
-    a <- (Right <$> io) `catches`
+    a <- (Right <$> mask_ io) `catches`
          [ Handler $ \(e :: AsyncException)     -> throwIO e
          , Handler $ \(e :: SomeAsyncException) -> throwIO e
          , Handler $ \(e :: SomeException)      -> pure (Left e)
@@ -308,6 +344,8 @@ evalReq = do
 -- Creation of PyObject
 ----------------------------------------------------------------
 
+decref :: Ptr PyObject -> Py ()
+decref p = Py [CU.exp| void { Py_DECREF($(PyObject* p)) } |]
 
 -- | Wrap raw python object into
 newPyObject :: Ptr PyObject -> Py PyObject
@@ -324,3 +362,82 @@ newPyObject p
 
 py_XDECREF :: FunPtr (Ptr PyObject -> IO ())
 py_XDECREF = [C.funPtr| void inline_py_XDECREF(PyObject* p) { Py_XDECREF(p); } |]
+
+
+
+----------------------------------------------------------------
+-- Conversion of exceptions
+----------------------------------------------------------------
+
+-- | Convert haskell exception to python exception. Always returns
+--   NULL.
+convertHaskell2Py :: SomeException -> Py (Ptr PyObject)
+convertHaskell2Py err = Py $ do
+  withCString ("Haskell exception: "++show err) $ \p_err -> do
+    [CU.block| PyObject* {
+      PyErr_SetString(PyExc_RuntimeError, $(char *p_err));
+      return NULL;
+      } |]
+
+-- | Convert python exception to haskell exception. Should only be
+--   called if there's unhandled python exception. Clears exception.
+convertPy2Haskell :: Py PyError
+convertPy2Haskell = evalContT $ do
+  p_err <- withPyAlloca @(Ptr CChar)
+  -- Return 0 and set error message if there's python error
+  r     <- liftIO [CU.block| int {
+    char **p_msg = $(char **p_err);
+    PyObject *e_type, *e_value, *e_trace;
+    // Fetch python's error
+    PyErr_Fetch( &e_type, &e_value, &e_trace);
+    if( NULL == e_value ) {
+        return -1;
+    }
+    // Convert to python string object
+    PyObject *e_str = PyObject_Str(e_value);
+    if( NULL == e_str ) {
+        *p_msg = 0;
+        return 0;
+    }
+    // Convert to UTF8 C string
+    Py_ssize_t len;
+    const char *err_msg = PyUnicode_AsUTF8AndSize(e_str, &len);
+    if( 0 == e_str ) {
+        Py_DECREF(e_str);
+        *p_msg = 0;
+        return 0;
+    }
+    // Copy message
+    *p_msg = malloc(len+1);
+    strncpy(*p_msg, err_msg, len);
+    Py_DECREF(e_str);
+    return 0;
+    } |]
+  liftIO $ case r of
+    0 -> peek p_err >>= \case
+      NULL  -> pure $ PyError "CANNOT SHOW EXCEPTION"
+      c_err -> do
+        s <- peekCString c_err
+        free c_err
+        pure $ PyError s
+    _ -> error "No python exception raised"
+
+-- | Throw python error as haskell exception if it's raised.
+throwPyError :: Py ()
+throwPyError = 
+  Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
+    NULL -> pure ()
+    _    -> throwPy =<< convertPy2Haskell
+
+throwPyConvesionFailed :: Py ()
+throwPyConvesionFailed = do
+  r <- Py [CU.block| int {
+    if( PyErr_Occurred() ) {
+        PyErr_Clear();
+        return 1;
+    }
+    return 0;
+    } |]
+  case r of
+    0 -> pure ()
+    _ -> throwPy FromPyFailed 

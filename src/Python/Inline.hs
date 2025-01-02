@@ -8,7 +8,9 @@ module Python.Inline
   , ToPy(..)
   , FromPy(..)
   , toPy
+  , fromPyEither
   , fromPy
+  , fromPy'
   ) where
 
 
