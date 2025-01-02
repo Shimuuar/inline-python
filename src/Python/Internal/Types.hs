@@ -10,10 +10,11 @@ module Python.Internal.Types
     PyObject(..)
   , PyError(..)
   , Py(..)
-  , finallyPy
   , catchPy
-  , maskPy_
+  , finallyPy
+  , onExceptionPy
   , throwPy
+  , tryPy
     -- * inline-C
   , pyCtx
     -- * Patterns
@@ -43,19 +44,27 @@ import Language.C.Inline.Context
 newtype PyObject = PyObject (ForeignPtr PyObject)
 
 -- | Python exception converted to haskell
-data PyError = PyError String
+data PyError
+  = PyError String
+    -- ^ Python exception
+  | FromPyFailed
+    -- ^ Conversion
   deriving stock (Show)
 
 instance Exception PyError
 
 
 -- | Monad for code which is interacts directly with python
---   interpreter. It's needed because in multithreaded runtime one
---   can't call python's C function from any thread. We need to send
---   it for execution on designated OS thread. 
+--   interpreter. One could assume that code in this monad executes
+--   with async exceptions masked.
+--
+--   We need to treat code interacting with python interpreter
+--   differently from plain @IO@ since it must be executed in single OS
+--   threads. On other hand lifting @IO@ to @Py@ is safe.
 newtype Py a = Py (IO a)
   deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail)
 -- See NOTE: [Python and threading]
+-- See NOTE: [Async exceptions]
 
 catchPy :: forall e a. Exception e => Py a -> (e -> Py a) -> Py a
 catchPy = coerce (catch @e @a)
@@ -63,11 +72,14 @@ catchPy = coerce (catch @e @a)
 finallyPy :: forall a b. Py a -> Py b -> Py a
 finallyPy = coerce (finally @a @b)
 
-maskPy_ :: forall a. Py a -> Py a
-maskPy_ = coerce (mask_ @a)
+onExceptionPy :: forall a b. Py a -> Py b -> Py a
+onExceptionPy = coerce (onException @a @b)
 
 throwPy :: Exception e => e -> Py a
 throwPy = Py . throwIO
+
+tryPy :: forall e a. Exception e => Py a -> Py (Either e a)
+tryPy = coerce (try @e @a)
 
 ----------------------------------------------------------------
 -- inline-C

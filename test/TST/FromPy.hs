@@ -1,4 +1,5 @@
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE QuasiQuotes         #-}
 -- |
 module TST.FromPy (tests) where
 
@@ -30,7 +31,7 @@ tests = testGroup "FromPy"
                    def __bool__(self):
                        raise Exception("Bad __bool__")
                |]
-        eq @Bool Nothing =<< [pye| Bad() |]
+        failE @Bool =<< [pye| Bad() |]
         -- Segfaults if exception is not cleared
         [py_| 1+1 |]
     ]
@@ -45,3 +46,9 @@ tests = testGroup "FromPy"
 
 eq :: (Eq a, Show a, FromPy a) => Maybe a -> PyObject -> IO ()
 eq a p = assertEqual "fromPy: " a =<< fromPy p
+
+failE :: forall a. (Eq a, Show a, FromPy a) => PyObject -> IO ()
+failE p = fromPyEither @a p >>= \case
+  Left PyError{} -> pure ()
+  r              -> assertFailure $ "Should fail with exception, but: " ++ show r
+

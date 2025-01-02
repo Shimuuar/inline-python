@@ -1,8 +1,12 @@
 -- |
 module Python.Internal.Program
   ( Program
+    -- * Control flow
   , abort
   , abortM
+  , finallyProg
+  , onExceptionProg
+    -- * Allocators
   , withPyAlloca
   , withPyAllocaArray
   , withPyCString
@@ -33,6 +37,18 @@ abort r = ContT $ \_ -> pure r
 -- | Early exit from continuation monad.
 abortM :: Monad m => m r -> ContT r m a
 abortM m = ContT $ \_ -> m
+
+-- | Evaluate finalizer even if exception is thrown.
+finallyProg
+  :: Py b -- ^ Finalizer
+  -> Program r ()
+finallyProg fini = ContT $ \c -> c () `finallyPy` fini
+
+-- | Evaluate finalizer if exception is thrown.
+onExceptionProg
+  :: Py b -- ^ Finalizer
+  -> Program r ()
+onExceptionProg fini = ContT $ \c -> c () `onExceptionPy` fini
 
 
 ----------------------------------------------------------------

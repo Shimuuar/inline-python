@@ -14,9 +14,12 @@ module Python.Internal.Eval
   , withPython
     -- * PyObject wrapper
   , newPyObject
+  , decref
     -- * Exceptions
   , convertHaskell2Py
   , convertPy2Haskell
+  , throwPyError
+  , throwPyConvesionFailed
   ) where
 
 import Control.Concurrent
@@ -113,6 +116,23 @@ C.include "<inline-python.h>"
 
 
 
+-- NOTE: [Async exceptions]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- Code interacting with python interpreter interleaves C calls and
+-- haskell code. It's impossible to ensure invariant that python
+-- interpreter demands from us if computation could be interrupted in
+-- arbitrary points.
+--
+-- So solution is to execute such code with async exceptions masked.
+-- `runPy` and friends should ensure that.
+--
+-- This may cause problems with callbacks to haskell. Async exceptions
+-- won't reach worker thread, and python interpreter couldn't be
+-- interrupted as well. We poll for that at beginning of callback.
+-- We'll see whether it causes problems in practice.
+
+
 
 ----------------------------------------------------------------
 -- Data types used for multithreaded RTS
@@ -162,6 +182,8 @@ toDECREF = unsafePerformIO $ newMVar Nil
 
 -- | Execute python action.
 runPy :: Py a -> IO a
+-- See NOTE: [Python and threading]
+-- See NOTE: [Threading and exceptions]
 runPy py
   -- Multithreaded RTS
   | rtsSupportsBoundThreads = do
@@ -181,9 +203,9 @@ runPy py
             Right a -> pure a
         ) `catch` onExc
   -- Single-threaded RTS
-  | otherwise = unPy py
--- See NOTE: [Python and threading]
--- See NOTE: [Threading and exceptions]
+  --
+  -- See NOTE: [Async exceptions]
+  | otherwise = mask_ $ unPy py
 
 
 -- | Execute python action. This function is unsafe and should be only
@@ -291,10 +313,10 @@ evalReq :: IO ()
 evalReq = do
   PyEvalReq{prog=Py io, result, status} <- takeMVar toPythonThread
   -- GC
-  let decref Nil = pure ()
-      decref (p `Cons` ps) = do [CU.exp| void { Py_XDECREF($(PyObject* p)) } |]
-                                decref ps
-  decref =<< modifyMVar toDECREF (\xs -> pure (Nil, xs))
+  let decrefList Nil = pure ()
+      decrefList (p `Cons` ps) = do [CU.exp| void { Py_XDECREF($(PyObject* p)) } |]
+                                    decrefList ps
+  decrefList =<< modifyMVar toDECREF (\xs -> pure (Nil, xs))
   -- Update status of request
   do_eval <- modifyMVar status $ \case
     Running   -> error "Python evaluator: Internal error. Got 'Running' request"
@@ -302,7 +324,7 @@ evalReq = do
     Cancelled -> return (Cancelled,False)
     Pending   -> return (Running,  True)
   when do_eval $ do
-    a <- (Right <$> io) `catches`
+    a <- (Right <$> mask_ io) `catches`
          [ Handler $ \(e :: AsyncException)     -> throwIO e
          , Handler $ \(e :: SomeAsyncException) -> throwIO e
          , Handler $ \(e :: SomeException)      -> pure (Left e)
@@ -322,6 +344,8 @@ evalReq = do
 -- Creation of PyObject
 ----------------------------------------------------------------
 
+decref :: Ptr PyObject -> Py ()
+decref p = Py [CU.exp| void { Py_DECREF($(PyObject* p)) } |]
 
 -- | Wrap raw python object into
 newPyObject :: Ptr PyObject -> Py PyObject
@@ -397,3 +421,23 @@ convertPy2Haskell = evalContT $ do
         free c_err
         pure $ PyError s
     _ -> error "No python exception raised"
+
+-- | Throw python error as haskell exception if it's raised.
+throwPyError :: Py ()
+throwPyError = 
+  Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
+    NULL -> pure ()
+    _    -> throwPy =<< convertPy2Haskell
+
+throwPyConvesionFailed :: Py ()
+throwPyConvesionFailed = do
+  r <- Py [CU.block| int {
+    if( PyErr_Occurred() ) {
+        PyErr_Clear();
+        return 1;
+    }
+    return 0;
+    } |]
+  case r of
+    0 -> pure ()
+    _ -> throwPy FromPyFailed 

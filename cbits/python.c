@@ -18,17 +18,19 @@ PyObject *inline_py_function_wrapper(PyCFunction fun, int flags) {
 }
 
 int inline_py_unpack_iterable(PyObject *iterable, int n, PyObject **out) {
-    // Fill out with NULL. This way we can call XDECREF on them
-    for(int i = 0; i < n; i++) {
-        out[i] = NULL;
-    }
-    // Initialize iterator
+    // Initialize iterator. If object is not an iterable we treat this
+    // as not an exception but as a conversion failure
     PyObject* iter = PyObject_GetIter( iterable );
     if( PyErr_Occurred() ) {
+        PyErr_Clear();
         return -1;
     }
     if( !PyIter_Check(iter) ) {
         goto err_iter;
+    }
+    // Fill out with NULL. This way we can call XDECREF on them
+    for(int i = 0; i < n; i++) {
+        out[i] = NULL;
     }
     // Fill elements
     for(int i = 0; i < n; i++) {
@@ -54,7 +56,6 @@ err_iter:
     Py_DECREF(iter);
     return -1;
 }
-
 
 void inline_py_free_capsule(PyObject* py) {
     PyMethodDef *meth = PyCapsule_GetPointer(py, NULL);
