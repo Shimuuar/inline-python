@@ -66,10 +66,11 @@ Library
     Python.Inline
     Python.Types
   Other-modules:
-    Python.Internal.Types
-    Python.Internal.Util
     Python.Internal.Eval
     Python.Internal.EvalQQ
+    Python.Internal.Program
+    Python.Internal.Types
+    Python.Internal.Util
     Paths_inline_python
   Autogen-modules:
     Paths_inline_python

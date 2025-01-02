@@ -11,6 +11,7 @@ module Python.Internal.Types
   , PyError(..)
   , Py(..)
   , finallyPy
+  , catchPy
     -- * inline-C
   , pyCtx
     -- * Patterns
@@ -54,6 +55,9 @@ newtype Py a = Py (IO a)
   deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail)
 -- See NOTE: [Python and threading]
 
+catchPy :: forall e a. Exception e => Py a -> (e -> Py a) -> Py a
+catchPy = coerce (catch @e @a)
+
 finallyPy :: forall a b. Py a -> Py b -> Py a
 finallyPy = coerce (finally @a @b)
 
@@ -68,6 +72,10 @@ pyCtx = mempty { ctxTypesTable = Map.fromList tytabs } where
     [ (TypeName "PyObject", [t| PyObject |])
     ]
 
+
+----------------------------------------------------------------
+-- Patterns
+----------------------------------------------------------------
 
 pattern IPY_OK, IPY_ERR_PYTHON, IPY_ERR_COMPILE :: CInt
 -- | Success

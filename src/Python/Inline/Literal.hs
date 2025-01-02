@@ -29,8 +29,7 @@ import Language.C.Inline.Unsafe  qualified as CU
 import Python.Types
 import Python.Internal.Types
 import Python.Internal.Eval
-import Python.Internal.Util
-
+import Python.Internal.Program
 
 ----------------------------------------------------------------
 C.context (C.baseCtx <> pyCtx)
@@ -182,7 +181,7 @@ instance (FromPy a, FromPy b) => FromPy (a,b) where
       }|]
     -- We may want to extract exception to haskell side later
     liftIO [CU.exp| void { PyErr_Clear() } |]
-    when (unpack_ok /= 0) $ abort $ pure Nothing
+    when (unpack_ok /= 0) $ abort Nothing
     -- Unpack 2-elements
     lift $ do
       p_a <- liftIO $ peekElemOff p_args 0
@@ -243,7 +242,7 @@ instance (FromPy a, ToPy b) => ToPy (a -> IO b) where
     -- C function pointer for callback
     f_ptr <- wrapO $ \_ p_a -> pyProg $ do
       a <- liftIO (unPy (basicFromPy p_a)) >>= \case
-        Nothing -> abort $ raiseUndecodedArg 1 1
+        Nothing -> abortM $ raiseUndecodedArg 1 1
         Just a  -> pure a
       liftIO $ unPy . basicToPy =<< f a
     --
@@ -257,7 +256,7 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
   basicToPy f = Py $ do
     -- Create haskell function
     f_ptr <- wrapFastcall $ \_ p_arr n -> pyProg $ do
-      when (n /= 2) $ abort $ raiseBadNArgs 2 n
+      when (n /= 2) $ abortM $ raiseBadNArgs 2 n
       a <- loadArgFastcall p_arr 0 n
       b <- loadArgFastcall p_arr 1 n
       liftIO $ unPy . basicToPy =<< f a b
@@ -269,40 +268,35 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
           METH_FASTCALL);
       }|]
 
-type PyProg r a = ContT r IO a
-
-loadArgFastcall :: FromPy a => Ptr (Ptr PyObject) -> Int -> Int64 -> PyProg (Ptr PyObject) a
+loadArgFastcall :: FromPy a => Ptr (Ptr PyObject) -> Int -> Int64 -> Program (Ptr PyObject) a
 loadArgFastcall p_arr i tot = do
   p <- liftIO $ peekElemOff p_arr i
   liftIO (unPy (basicFromPy p)) >>= \case
-    Nothing -> abort $ raiseUndecodedArg (fromIntegral i + 1) (fromIntegral tot)
+    Nothing -> abortM $ raiseUndecodedArg (fromIntegral i + 1) (fromIntegral tot)
     Just a  -> pure a
 
 
-abort :: Monad m => m r -> ContT r m a
-abort m = ContT $ \_ -> m
-
-raiseUndecodedArg :: CInt -> CInt -> IO (Ptr PyObject)
-raiseUndecodedArg n tot = [CU.block| PyObject* {
+raiseUndecodedArg :: CInt -> CInt -> Py (Ptr PyObject)
+raiseUndecodedArg n tot = Py [CU.block| PyObject* {
   char err[256];
   sprintf(err, "Failed to decode function argument %i of %i", $(int n), $(int tot));
   PyErr_SetString(PyExc_TypeError, err);
   return NULL;
   } |]
 
-raiseBadNArgs :: CInt -> Int64 -> IO (Ptr PyObject)
-raiseBadNArgs tot n = [CU.block| PyObject* {
+raiseBadNArgs :: CInt -> Int64 -> Py (Ptr PyObject)
+raiseBadNArgs tot n = Py [CU.block| PyObject* {
   char err[256];
   sprintf(err, "Function takes exactly %i arguments (%li given)", $(int tot), $(int64_t n));
   PyErr_SetString(PyExc_TypeError, err);
   return NULL;
   } |]
 
-pyProg :: PyProg (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
-pyProg io = evalContT io `catch` convertHaskellException
+pyProg :: Program (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
+pyProg io = unPy $ evalContT io `catchPy` convertHaskellException
 
-convertHaskellException :: SomeException -> IO (Ptr PyObject)
-convertHaskellException err = do
+convertHaskellException :: SomeException -> Py (Ptr PyObject)
+convertHaskellException err = Py $ do
   withCString ("Haskell exception: "++show err) $ \p_err -> do
     [CU.block| PyObject* {
       PyErr_SetString(PyExc_RuntimeError, $(char *p_err));
