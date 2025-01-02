@@ -240,20 +240,27 @@ doInializePython = do
       PyStatus status;
       PyConfig cfg;
       PyConfig_InitPythonConfig( &cfg );
-      //--
-      status = PyConfig_SetBytesString(&cfg, &cfg.program_name, "XX");
-      if (PyStatus_Exception(status)) { goto error; }
       cfg.parse_argv = 0;
-      //--
+      //----------------
+      status = PyConfig_SetBytesString(&cfg, &cfg.program_name, "XX");
+      if( PyStatus_Exception(status) ) {
+          goto error;
+      }
+      //----------------
       status = PyConfig_SetArgv(&cfg,
           $(int       n_argv),
           $(wchar_t** ptr_argv)
       );
-      if( PyStatus_Exception(status) ) { goto error; };
+      if( PyStatus_Exception(status) ) {
+          goto error;
+      };
       // Initialize interpreter
       status = Py_InitializeFromConfig(&cfg);
+      if( PyStatus_Exception(status) ) {
+          goto error;
+      };
       PyConfig_Clear(&cfg);
-      return PyStatus_Exception(status);
+      return 0;
       // Error case
       error:
       PyConfig_Clear(&cfg);
