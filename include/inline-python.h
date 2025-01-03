@@ -5,6 +5,11 @@
 #include <Rts.h>
 
 
+// Use new stable API from 
+#ifndef PyCFunctionFast
+typedef _PyCFunctionFast PyCFunctionFast;
+#endif
+
 // ----------------------------------------------------------------
 // Standard status codes
 
@@ -12,7 +17,27 @@
 #define IPY_ERR_PYTHON  1
 #define IPY_ERR_COMPILE 2
 
-// ----------------------------------------------------------------
+
+
+// ================================================================
+// Callbacks
+// ================================================================
+
+// Callback depth. It's used to decide whether we want to just
+// continue in bound thread. Should only be modified while GIL is held
+extern int inline_py_callback_depth;
+
+// Wrap haskell callback using METH_O calling convention
+PyObject *inline_py_callback_METH_O(PyCFunction fun);
+
+// Wrap haskell callback using METH_FASTCALL calling convention
+PyObject *inline_py_callback_METH_FASTCALL(PyCFunctionFast fun);
+
+
+
+// ================================================================
+// Callbacks
+// ================================================================
 
 // Unpack iterable into array of PyObjects. Iterable must contain
 // exactly N elements.
@@ -27,13 +52,3 @@ int inline_py_unpack_iterable(
     int        n,
     PyObject **out
     );
-
-// Allocate python function object which carrries its own PyMethodDef.
-// Returns function object or NULL with error raised.
-//
-// See NOTE: [Creation of python functions]
-PyObject *inline_py_function_wrapper(PyCFunction fun, int flags);
-
-// Free malloc'd buffer inside PyCapsule
-void inline_py_free_capsule(PyObject*);
-

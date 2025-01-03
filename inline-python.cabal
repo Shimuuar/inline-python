@@ -79,6 +79,8 @@ Library
 ----------------------------------------------------------------
 library test
   import:           language
+  Default-Extensions:
+    QuasiQuotes
   build-depends:    base
                   , inline-python
                   , tasty            >=1.2
@@ -88,6 +90,8 @@ library test
     TST.Run
     TST.ToPy
     TST.FromPy
+    TST.Callbacks
+    TST.Util
 
 test-suite inline-python-tests
   import:           language

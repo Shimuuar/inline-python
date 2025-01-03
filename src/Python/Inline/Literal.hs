@@ -12,7 +12,6 @@ module Python.Inline.Literal
   , fromPy'
   ) where
 
-import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
@@ -23,7 +22,6 @@ import Data.Word
 import Data.Foldable
 import Foreign.Ptr
 import Foreign.C.Types
-import Foreign.Marshal.Alloc
 import Foreign.Storable
 
 import Language.C.Inline         qualified as C
@@ -285,7 +283,7 @@ instance (FromPy a) => FromPy [a] where
 --        with async exception out of the blue
 
 
-instance (FromPy a, ToPy b) => ToPy (a -> IO b) where
+instance (FromPy a, Show a, ToPy b) => ToPy (a -> IO b) where
   basicToPy f = Py $ do
     -- C function pointer for callback
     f_ptr <- wrapO $ \_ p_a -> pyCallback $ do
@@ -295,10 +293,9 @@ instance (FromPy a, ToPy b) => ToPy (a -> IO b) where
         Right a            -> pure a
       liftIO $ unPy . basicToPy =<< f a
     --
-    [C.exp| PyObject* {
-      inline_py_function_wrapper(
-          $(PyObject* (*f_ptr)(PyObject*, PyObject*)),
-          METH_O)
+    [CU.block| PyObject* {
+      inline_py_callback_METH_O(
+          $(PyObject* (*f_ptr)(PyObject*, PyObject*)));
       }|]
 
 instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
@@ -311,10 +308,8 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
       liftIO $ unPy . basicToPy =<< f a b
     -- Create python function
     [C.block| PyObject* {
-      _PyCFunctionFast impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*const*, int64_t));
-      return inline_py_function_wrapper(
-          (PyCFunction)impl,
-          METH_FASTCALL);
+      PyCFunctionFast impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*const*, int64_t));
+      return inline_py_callback_METH_FASTCALL(impl);
       }|]
 
 loadArgFastcall :: FromPy a => Ptr (Ptr PyObject) -> Int -> Int64 -> Program (Ptr PyObject) a
@@ -331,7 +326,7 @@ loadArgFastcall p_arr i tot = do
 ----------------------------------------------------------------
 
 pyCallback :: Program (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
-pyCallback io = unPy $ evalContT io `catchPy` convertHaskell2Py
+pyCallback io = unPy $ ensureGIL $ evalContT io `catchPy` convertHaskell2Py
 
 raiseUndecodedArg :: CInt -> CInt -> Py (Ptr PyObject)
 raiseUndecodedArg n tot = Py [CU.block| PyObject* {

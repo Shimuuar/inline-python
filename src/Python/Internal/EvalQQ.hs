@@ -14,14 +14,11 @@ module Python.Internal.EvalQQ
   , unindent
   ) where
 
-import Control.Exception
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Cont
 import Data.Char
 import Foreign.C.Types
-import Foreign.C.String
-import Foreign.Marshal.Alloc
 import Foreign.Ptr
 import Foreign.Storable
 import System.Exit
