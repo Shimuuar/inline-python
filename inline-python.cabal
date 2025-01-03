@@ -90,6 +90,8 @@ library test
     TST.Run
     TST.ToPy
     TST.FromPy
+    TST.Callbacks
+    TST.Util
 
 test-suite inline-python-tests
   import:           language
