@@ -113,3 +113,26 @@ test-suite inline-python-tests1
                   , inline-python
                   , inline-python:test
                   , tasty
+
+benchmark pysmall
+  import:           language
+  type:             exitcode-stdio-1.0
+  Ghc-options:      -threaded
+  main-is:          Main.hs
+  hs-source-dirs:   bench
+  build-depends:
+        base >= 2 && < 5
+      , inline-python
+      , tasty
+      , tasty-bench >= 0.2.1
+
+benchmark pysmall1
+  import:           language
+  type:             exitcode-stdio-1.0
+  main-is:          Main.hs
+  hs-source-dirs:   bench
+  build-depends:
+        base >= 2 && < 5
+      , inline-python
+      , tasty
+      , tasty-bench >= 0.2.1
