@@ -15,6 +15,7 @@ module Python.Internal.Eval
     -- * PyObject wrapper
   , newPyObject
   , decref
+  , ensureGIL
     -- * Exceptions
   , convertHaskell2Py
   , convertPy2Haskell
@@ -205,7 +206,7 @@ runPy py
   -- Single-threaded RTS
   --
   -- See NOTE: [Async exceptions]
-  | otherwise = mask_ $ unPy py
+  | otherwise = mask_ $ unPy $ ensureGIL py
 
 
 -- | Execute python action. This function is unsafe and should be only
@@ -324,7 +325,7 @@ evalReq = do
     Cancelled -> return (Cancelled,False)
     Pending   -> return (Running,  True)
   when do_eval $ do
-    a <- (Right <$> mask_ io) `catches`
+    a <- (Right <$> mask_ (unPy $ ensureGIL prog)) `catches`
          [ Handler $ \(e :: AsyncException)     -> throwIO e
          , Handler $ \(e :: SomeAsyncException) -> throwIO e
          , Handler $ \(e :: SomeException)      -> pure (Left e)
@@ -346,6 +347,16 @@ evalReq = do
 
 decref :: Ptr PyObject -> Py ()
 decref p = Py [CU.exp| void { Py_DECREF($(PyObject* p)) } |]
+
+-- | Ensure that we hold GIL for duration of action
+ensureGIL :: Py a -> Py a
+ensureGIL action = do
+  -- NOTE: We're cheating here and looking behind the veil.
+  --       PyGILState_STATE is defined as enum. Let hope it will stay
+  --       this way.
+  gil_state <- Py [CU.exp| int { PyGILState_Ensure() } |]
+  action `finallyPy` Py [CU.exp| void { PyGILState_Release($(int gil_state)) } |]
+
 
 -- | Wrap raw python object into
 newPyObject :: Ptr PyObject -> Py PyObject
