@@ -187,22 +187,26 @@ runPy :: Py a -> IO a
 -- See NOTE: [Threading and exceptions]
 runPy py
   -- Multithreaded RTS
-  | rtsSupportsBoundThreads = do
-      result <- newEmptyMVar
-      status <- newMVar Pending
-      let onExc :: SomeException -> IO b
-          onExc e = do
-            modifyMVar_ status $ \case
-              Pending   -> pure Cancelled
-              Cancelled -> pure Cancelled
-              Done      -> pure Done
-              Running   -> Cancelled <$ [CU.exp| void { PyErr_SetInterrupt() } |]
-            throwIO e
-      (do putMVar toPythonThread $ PyEvalReq{ prog=py, ..}
-          takeMVar result >>= \case
-            Left  e -> throwIO e
-            Right a -> pure a
-        ) `catch` onExc
+  --
+  -- Here we check whether we're in callback or creating a new call
+  | rtsSupportsBoundThreads = [CU.exp| int { inline_py_callback_depth } |] >>= \case
+      0 -> do
+        result <- newEmptyMVar
+        status <- newMVar Pending
+        let onExc :: SomeException -> IO b
+            onExc e = do
+              modifyMVar_ status $ \case
+                Pending   -> pure Cancelled
+                Cancelled -> pure Cancelled
+                Done      -> pure Done
+                Running   -> Cancelled <$ [CU.exp| void { PyErr_SetInterrupt() } |]
+              throwIO e
+        (do putMVar toPythonThread $ PyEvalReq{ prog=py, ..}
+            takeMVar result >>= \case
+              Left  e -> throwIO e
+              Right a -> pure a
+          ) `catch` onExc
+      _ -> unPy $ ensureGIL py
   -- Single-threaded RTS
   --
   -- See NOTE: [Async exceptions]
@@ -312,7 +316,7 @@ evalReq :: IO ()
 -- See NOTE: [Python and threading]
 -- See NOTE: [Threading and exceptions]
 evalReq = do
-  PyEvalReq{prog=Py io, result, status} <- takeMVar toPythonThread
+  PyEvalReq{prog, result, status} <- takeMVar toPythonThread
   -- GC
   let decrefList Nil = pure ()
       decrefList (p `Cons` ps) = do [CU.exp| void { Py_XDECREF($(PyObject* p)) } |]

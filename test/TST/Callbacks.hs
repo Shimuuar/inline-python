@@ -1,6 +1,7 @@
 -- |
 module TST.Callbacks (tests) where
 
+import Control.Concurrent
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
@@ -26,24 +27,28 @@ tests = testGroup "Callbacks"
          except TypeError as e:
              pass
          |]
-   , testCase "Function(arity=2)" $ do
-      let foo :: Int -> Double -> IO Int
-          foo x y = pure $ x + round y
-      [py_|
-          assert foo_hs(3, 100.2) == 103
-          assert foo_hs(3, 100)   == 103
-          # Invalid arg
-          try:
-              foo_hs(None, 100)
-          except TypeError as e:
-              pass
-          # Wrong arg number
-          try:
-              foo_hs(1,2,3)
-          except TypeError as e:
-              pass
-          |]
-  , testCase "Haskell exception in callback" $ do
+  , testCase "Function(arity=2)" $ do
+     let foo :: Int -> Double -> IO Int
+         foo x y = pure $ x + round y
+     [py_|
+         assert foo_hs(3, 100.2) == 103
+         assert foo_hs(3, 100)   == 103
+         # Invalid arg
+         try:
+             foo_hs(None, 100)
+         except TypeError as e:
+             pass
+         # Wrong arg number
+         try:
+             foo_hs(1,2,3)
+         except TypeError as e:
+             pass
+         |]
+  , testCase "Haskell exception in callback(arity=1)" $ do
+      let foo :: Int -> IO Int
+          foo y = pure $ 10 `div` y
+      throwsPy [py_| foo_hs(0) |]
+  , testCase "Haskell exception in callback(arity=2)" $ do
       let foo :: Int -> Int -> IO Int
           foo x y = pure $ x `div` y
       throwsPy [py_| foo_hs(1, 0) |]
