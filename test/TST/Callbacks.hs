@@ -47,4 +47,11 @@ tests = testGroup "Callbacks"
       let foo :: Int -> Int -> IO Int
           foo x y = pure $ x `div` y
       throwsPy [py_| foo_hs(1, 0) |]
-   ]
+  , testCase "Call python in callback" $ do
+      let foo :: Int -> IO Int
+          foo x = do Just x' <- fromPy =<< [pye| 100 // x_hs |]
+                     pure x'
+      [py_|
+        assert foo_hs(5) == 20
+        |]
+  ]
