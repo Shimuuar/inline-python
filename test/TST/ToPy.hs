@@ -1,5 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE QuasiQuotes         #-}
 -- |
 module TST.ToPy (tests) where
 
