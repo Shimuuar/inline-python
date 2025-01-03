@@ -18,8 +18,8 @@ tests = testGroup "Run python"
              x
              |]
       -- Visible
-      _ <- [py_| x |]
-      [pye| x |]
+      [py_| x |]
+      _ <- [pye| x |]
       [pymain|
         x
         del x

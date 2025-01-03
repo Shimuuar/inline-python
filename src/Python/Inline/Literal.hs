@@ -12,8 +12,6 @@ module Python.Inline.Literal
   , fromPy'
   ) where
 
-import Control.Concurrent
-import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
@@ -24,7 +22,6 @@ import Data.Word
 import Data.Foldable
 import Foreign.Ptr
 import Foreign.C.Types
-import Foreign.Marshal.Alloc
 import Foreign.Storable
 
 import Language.C.Inline         qualified as C

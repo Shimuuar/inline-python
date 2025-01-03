@@ -1,7 +1,6 @@
 -- |
 module TST.Callbacks (tests) where
 
-import Control.Concurrent
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline

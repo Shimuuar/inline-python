@@ -14,7 +14,6 @@ module Python.Internal.Program
   , withPyWCString
   ) where
 
-import Control.Exception
 import Control.Monad.Trans.Cont
 import Data.Coerce
 import Foreign.Ptr
