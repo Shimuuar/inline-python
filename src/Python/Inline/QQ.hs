@@ -60,7 +60,7 @@ pye = QuasiQuoter
 --   call return
 pyf :: QuasiQuoter
 pyf = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ evalutorPyf $(expQQ Fun txt) |]
+  { quoteExp  = \txt -> [| runPy $ evaluatorPyf $(expQQ Fun txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"

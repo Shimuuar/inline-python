@@ -81,4 +81,26 @@ tests = testGroup "Run python"
         except NameError:
             pass
         |]
+  , testCase "Scope pyf->any" $ do
+      _ <- [pyf|
+        x = 12
+        x
+        return 12
+        |]
+      -- Not visible
+      throwsPy $ void [pye| x |]
+      [py_|
+        try:
+            x
+            assert False, "x shouln't be visible (1)"
+        except NameError:
+            pass
+        |]
+      [pymain|
+        try:
+            x
+            assert False, "x shouln't be visible (2)"
+        except NameError:
+            pass
+        |]
   ]
