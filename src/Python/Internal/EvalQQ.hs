@@ -132,7 +132,7 @@ evaluatorPyf getSource = evalContT $ do
       p    -> pure p
     -- Call python function we just constructed
     callFunctionObject p_fun p_kwargs >>= \case
-      NULL  -> throwPy =<< convertPy2Haskell
+      NULL  -> mustThrowPyError "evaluatorPyf"
       p_res -> newPyObject p_res
 
 
@@ -141,7 +141,7 @@ basicBindInDict name a p_dict = evalContT $ do
   (p_key) <- withPyCString name
   p_obj   <- takeOwnership =<< lift (basicToPy a)
   lift $ case p_obj of
-    NULL -> throwPyError
+    NULL -> mustThrowPyError "basicBindInDict"
     _    -> do
       r <- Py [C.block| int {
         PyObject* p_obj = $(PyObject* p_obj);
@@ -149,7 +149,7 @@ basicBindInDict name a p_dict = evalContT $ do
         } |]
       case r of
         0 -> pure ()
-        _ -> throwPyError
+        _ -> mustThrowPyError "basicBindInDict"
 
 basicNewDict :: Py (Ptr PyObject)
 basicNewDict = Py [CU.exp| PyObject* { PyDict_New() } |]

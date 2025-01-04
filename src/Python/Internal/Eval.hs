@@ -23,6 +23,7 @@ module Python.Internal.Eval
   , convertHaskell2Py
   , convertPy2Haskell
   , throwPyError
+  , mustThrowPyError
   , throwPyConvesionFailed
     -- * Debugging
   , debugPrintPy
@@ -352,6 +353,14 @@ throwPyError :: Py ()
 throwPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> pure ()
+    _    -> throwPy =<< convertPy2Haskell
+
+-- | Throw python error as haskell exception if it's raised. If it's
+--   not that internal error. Another exception will be raised
+mustThrowPyError :: String -> Py a
+mustThrowPyError msg =
+  Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
+    NULL -> error $ "mustThrowPyError: no python exception raised. " ++ msg
     _    -> throwPy =<< convertPy2Haskell
 
 throwPyConvesionFailed :: Py ()
