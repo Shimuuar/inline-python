@@ -165,6 +165,10 @@ expQQ :: String -- ^ Python evaluation mode: @exec@/@eval@
       -> TH.Q TH.Exp
 expQQ mode src = do
   antis  <- liftIO $ do
+    -- We've embedded script into library and we need to pass source
+    -- code of QQ to a script. It can contain whatever symbols so to
+    -- be safe it's base16 encode. This encoding is very simple and we
+    -- don't care much about efficiency here
     (code, stdout, stderr) <- readProcessWithExitCode "python" ["-", mode]
       $ unlines [ script
                 , "decode_and_print('" <>
