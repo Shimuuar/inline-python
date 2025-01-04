@@ -1,6 +1,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 -- |
 -- Quasiquoters for embedding python expression into haskell programs.
+-- Python is statement oriented and heavily relies on mutable state.
+-- This means we need several different quasiquoters.
 module Python.Inline.QQ
   ( pymain
   , py_
@@ -16,6 +18,8 @@ import Python.Internal.Eval
 -- | Evaluate python code in context of main module. All variables
 --   defined in this block will remain visible. This quasiquote
 --   doesn't return any python value.
+--
+--   This quote creates object of type @IO ()@
 pymain :: QuasiQuoter
 pymain = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_main <- basicMainDict
@@ -30,6 +34,8 @@ pymain = QuasiQuoter
 -- | Evaluate python code in context of main module. All variables
 --   defined in this block will be discarded. This quasiquote doesn't
 --   return any python value.
+--
+--   This quote creates object of type @IO ()@
 py_ :: QuasiQuoter
 py_ = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_globals <- basicMainDict
@@ -44,7 +50,10 @@ py_ = QuasiQuoter
   , quoteDec  = error "quoteDec"
   }
 
--- | Evaluate single python expression
+-- | Evaluate single python expression. It only accepts single
+--   expressions same as python's @eval@.
+--
+--   This quote creates object of type @IO PyObject@
 pye :: QuasiQuoter
 pye = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_env <- basicNewDict

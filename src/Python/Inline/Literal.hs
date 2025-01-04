@@ -19,7 +19,6 @@ import Control.Monad.Trans.Cont
 import Data.Char
 import Data.Int
 import Data.Word
-import Data.Foldable
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Storable
@@ -42,9 +41,12 @@ C.include "<inline-python.h>"
 class ToPy a where
   -- | Convert haskell value to python object. This function returns
   --   strong reference to newly create objects (except singletons
-  --   like @None@, @True@, etc). Normally conversion should not fail
-  --   but when it does function must raise suitable python exception
-  --   and return @NULL@. Caller must check that.
+  --   like @None@, @True@, etc).
+  --
+  --   Implementations should try to avoid failing conversions.
+  --   There're two ways of signalling failure: errors on python side
+  --   should return NULL and raise python exception. Haskell code
+  --   should just throw exception.
   --
   --   This is low level function. It should be only used when working
   --   with python's C API. Otherwise 'toPy' is preferred.
@@ -53,12 +55,15 @@ class ToPy a where
   basicListToPy :: [a] -> Py (Ptr PyObject)
   basicListToPy xs = evalContT $ do
     let n = fromIntegral $ length xs :: CLLong
-    p_list <- liftIO [CU.exp| PyObject* { PyList_New($(long long n)) } |]
+    p_list <- checkNull (Py [CU.exp| PyObject* { PyList_New($(long long n)) } |])
     onExceptionProg $ decref p_list
-    lift $ for_ ([0..] `zip` xs) $ \(i,a) -> do
-      p_a <- basicToPy a
-      Py [CU.exp| void { PyList_SET_ITEM($(PyObject* p_list), $(long long i), $(PyObject* p_a)) } |]
-    pure p_list
+    let loop !_ []     = pure p_list
+        loop  i (a:as) = basicToPy a >>= \case
+          NULL -> pure nullPtr
+          p_a  -> do
+            liftIO [CU.exp| void { PyList_SET_ITEM($(PyObject* p_list), $(long long i), $(PyObject* p_a)) } |]
+            loop (i+1) as
+    lift $ loop 0 xs
 
 -- | Convert python object to haskell value.
 class FromPy a where
@@ -72,28 +77,44 @@ class FromPy a where
   --   with python's C API. Otherwise 'fromPy' is preferred.
   basicFromPy :: Ptr PyObject -> Py a
 
--- | Convert python object to haskell value
+-- | Convert python object to haskell value. All python exceptions
+--   which happen during execution will be converted to @PyError@.
 fromPyEither :: FromPy a => PyObject -> IO (Either PyError a)
 fromPyEither py = runPy $ unsafeWithPyObject py $ \p ->
   (Right <$> basicFromPy p) `catchPy` (pure . Left)
 
 
--- | Convert python object to haskell value. Python exception raised
---   during execution are thrown as exceptions
+-- | Convert python object to haskell value. Will return @Nothing@ if
+--   'FromPyFailed' is thrown. Other python exceptions are rethrown.
 fromPy :: FromPy a => PyObject -> IO (Maybe a)
 fromPy py = runPy $ unsafeWithPyObject py $ \p ->
   (Just <$> basicFromPy p) `catchPy` \case
     FromPyFailed -> pure Nothing
     e            -> throwPy e
 
--- | Convert python object to haskell value. Throws exception on failure
+-- | Convert python object to haskell value. Throws exception on
+--   failure.
 fromPy' :: FromPy a => PyObject -> IO a
 fromPy' py = runPy $ unsafeWithPyObject py basicFromPy
 
 -- | Convert haskell value to a python object.
 toPy :: ToPy a => a -> IO PyObject
-toPy a = runPy $ newPyObject =<< basicToPy a
+toPy a = runPy $ basicToPy a >>= \case
+  NULL -> throwPy =<< convertPy2Haskell
+  p    -> newPyObject p
 
+
+----------------------------------------------------------------
+-- Instances
+----------------------------------------------------------------
+
+instance ToPy PyObject where
+  basicToPy o = unsafeWithPyObject o $ \p ->
+    p <$ Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
+instance FromPy PyObject where
+  basicFromPy p = do
+    Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
+    newPyObject p
 
 instance ToPy CLong where
   basicToPy i = Py [CU.exp| PyObject* { PyLong_FromLong($(long i)) } |]
@@ -150,15 +171,13 @@ instance FromPy Int where
 instance ToPy Char where
   basicToPy c = do
     let i = fromIntegral (ord c) :: CUInt
-    r <- Py [CU.block| PyObject* {
+    Py [CU.block| PyObject* {
        uint32_t cs[1] = { $(unsigned i) };
        return PyUnicode_DecodeUTF32((char*)cs, 4, NULL, NULL);
        } |]
-    r <$ throwPyError
   basicListToPy str = evalContT $ do
     p_str <- withPyWCString str
-    p     <- liftIO [CU.exp| PyObject* { PyUnicode_FromWideChar($(wchar_t *p_str), -1) } |]
-    lift $ p <$ throwPyError
+    liftIO [CU.exp| PyObject* { PyUnicode_FromWideChar($(wchar_t *p_str), -1) } |]
 
 
 instance FromPy Char where
@@ -196,13 +215,9 @@ instance FromPy Bool where
 
 instance (ToPy a, ToPy b) => ToPy (a,b) where
   basicToPy (a,b) = evalContT $ do
-    p_a <- lift $ basicToPy a
-    onExceptionProg (decref p_a)
-    p_b <- lift $ basicToPy b
-    onExceptionProg (decref p_b)
-    lift $ do
-      r <- Py [CU.exp| PyObject* { PyTuple_Pack(2, $(PyObject* p_a), $(PyObject* p_b)) } |]
-      r <$ throwPyError
+    p_a <- takeOwnership =<< checkNull (basicToPy a)
+    p_b <- takeOwnership =<< checkNull (basicToPy b)
+    liftIO [CU.exp| PyObject* { PyTuple_Pack(2, $(PyObject* p_a), $(PyObject* p_b)) } |]
 
 instance (FromPy a, FromPy b) => FromPy (a,b) where
   basicFromPy p_tup = evalContT $ do
@@ -214,12 +229,66 @@ instance (FromPy a, FromPy b) => FromPy (a,b) where
     lift $ do throwPyError
               when (unpack_ok /= 0) $ throwPy FromPyFailed
     -- Parse each element of tuple
-    p_a <- liftIO $ peekElemOff p_args 0
-    p_b <- liftIO $ peekElemOff p_args 1
-    finallyProg $ decref p_a >> decref p_b
+    p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
+    p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
     lift $ do a <- basicFromPy p_a
               b <- basicFromPy p_b
               pure (a,b)
+
+instance (ToPy a, ToPy b, ToPy c) => ToPy (a,b,c) where
+  basicToPy (a,b,c) = evalContT $ do
+    p_a <- takeOwnership =<< checkNull (basicToPy a)
+    p_b <- takeOwnership =<< checkNull (basicToPy b)
+    p_c <- takeOwnership =<< checkNull (basicToPy c)
+    liftIO [CU.exp| PyObject* {
+      PyTuple_Pack(3, $(PyObject *p_a), $(PyObject *p_b), $(PyObject *p_c)) } |]
+
+instance (FromPy a, FromPy b, FromPy c) => FromPy (a,b,c) where
+  basicFromPy p_tup = evalContT $ do
+    -- Unpack 3-tuple.
+    p_args    <- withPyAllocaArray 3
+    unpack_ok <- liftIO [CU.exp| int {
+      inline_py_unpack_iterable($(PyObject *p_tup), 3, $(PyObject **p_args))
+      }|]
+    lift $ do throwPyError
+              when (unpack_ok /= 0) $ throwPy FromPyFailed
+    -- Parse each element of tuple
+    p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
+    p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
+    p_c <- takeOwnership =<< liftIO (peekElemOff p_args 2)
+    lift $ do a <- basicFromPy p_a
+              b <- basicFromPy p_b
+              c <- basicFromPy p_c
+              pure (a,b,c)
+
+instance (ToPy a, ToPy b, ToPy c, ToPy d) => ToPy (a,b,c,d) where
+  basicToPy (a,b,c,d) = evalContT $ do
+    p_a <- takeOwnership =<< checkNull (basicToPy a)
+    p_b <- takeOwnership =<< checkNull (basicToPy b)
+    p_c <- takeOwnership =<< checkNull (basicToPy c)
+    p_d <- takeOwnership =<< checkNull (basicToPy d)
+    liftIO [CU.exp| PyObject* {
+      PyTuple_Pack(4, $(PyObject *p_a), $(PyObject *p_b), $(PyObject *p_c), $(PyObject *p_d)) } |]
+
+instance (FromPy a, FromPy b, FromPy c, FromPy d) => FromPy (a,b,c,d) where
+  basicFromPy p_tup = evalContT $ do
+    -- Unpack 3-tuple.
+    p_args    <- withPyAllocaArray 4
+    unpack_ok <- liftIO [CU.exp| int {
+      inline_py_unpack_iterable($(PyObject *p_tup), 4, $(PyObject **p_args))
+      }|]
+    lift $ do throwPyError
+              when (unpack_ok /= 0) $ throwPy FromPyFailed
+    -- Parse each element of tuple
+    p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
+    p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
+    p_c <- takeOwnership =<< liftIO (peekElemOff p_args 2)
+    p_d <- takeOwnership =<< liftIO (peekElemOff p_args 3)
+    lift $ do a <- basicFromPy p_a
+              b <- basicFromPy p_b
+              c <- basicFromPy p_c
+              d <- basicFromPy p_d
+              pure (a,b,c,d)
 
 instance (ToPy a) => ToPy [a] where
   basicToPy = basicListToPy
@@ -287,16 +356,11 @@ instance (FromPy a, Show a, ToPy b) => ToPy (a -> IO b) where
   basicToPy f = Py $ do
     -- C function pointer for callback
     f_ptr <- wrapO $ \_ p_a -> pyCallback $ do
-      a <- lift (tryPy (basicFromPy p_a)) >>= \case
-        Left  FromPyFailed -> abortM $ raiseUndecodedArg 1 1
-        Left  e            -> lift   $ throwPy e
-        Right a            -> pure a
+      a <- loadArg p_a 0 1
       liftIO $ unPy . basicToPy =<< f a
     --
-    [CU.block| PyObject* {
-      inline_py_callback_METH_O(
-          $(PyObject* (*f_ptr)(PyObject*, PyObject*)));
-      }|]
+    [CU.exp| PyObject* { inline_py_callback_METH_O($(PyCFunction f_ptr)) } |]
+
 
 instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
   basicToPy f = Py $ do
@@ -307,39 +371,50 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
       b <- loadArgFastcall p_arr 1 n
       liftIO $ unPy . basicToPy =<< f a b
     -- Create python function
-    [C.block| PyObject* {
-      PyCFunctionFast impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*const*, int64_t));
-      return inline_py_callback_METH_FASTCALL(impl);
-      }|]
-
-loadArgFastcall :: FromPy a => Ptr (Ptr PyObject) -> Int -> Int64 -> Program (Ptr PyObject) a
-loadArgFastcall p_arr i tot = do
-  p <- liftIO $ peekElemOff p_arr i
-  lift (tryPy (basicFromPy p)) >>= \case
-    Right a            -> pure a
-    Left  FromPyFailed -> abortM $ raiseUndecodedArg (fromIntegral i + 1) (fromIntegral tot)
-    Left  e            -> lift   $ throwPy e
-
+    [C.exp| PyObject* { inline_py_callback_METH_FASTCALL($(PyCFunctionFast f_ptr)) } |]
 
 ----------------------------------------------------------------
 -- Helpers
 ----------------------------------------------------------------
 
+
+-- | Execute haskell callback function
 pyCallback :: Program (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
 pyCallback io = unPy $ ensureGIL $ evalContT io `catchPy` convertHaskell2Py
 
-raiseUndecodedArg :: CInt -> CInt -> Py (Ptr PyObject)
-raiseUndecodedArg n tot = Py [CU.block| PyObject* {
-  char err[256];
-  sprintf(err, "Failed to decode function argument %i of %i", $(int n), $(int tot));
-  PyErr_SetString(PyExc_TypeError, err);
-  return NULL;
-  } |]
+-- | Load argument from python object for haskell evaluation
+loadArg
+  :: FromPy a
+  => (Ptr PyObject) -- ^ Python object to decode
+  -> Int            -- ^ Argument number (0-based)
+  -> Int64          -- ^ Total number of arguments
+  -> Program (Ptr PyObject) a
+loadArg p (fromIntegral -> i) (fromIntegral -> tot) = ContT $ \success -> do
+  tryPy (basicFromPy p) >>= \case
+    Right a            -> success a
+    Left  FromPyFailed -> Py [CU.block| PyObject* {
+      char err[256];
+      sprintf(err, "Failed to decode function argument %i of %li", $(int i)+1, $(int64_t tot));
+      PyErr_SetString(PyExc_TypeError, err);
+      return NULL;
+      } |]
+    Left  e            -> throwPy e
+
+-- | Load i-th argument from array as haskell parameter
+loadArgFastcall
+  :: FromPy a
+  => Ptr (Ptr PyObject) -- ^ Array of arguments
+  -> Int                -- ^ Argument number (0-based)
+  -> Int64              -- ^ Total number of arguments
+  -> Program (Ptr PyObject) a
+loadArgFastcall p_arr i tot = do
+  p <- liftIO $ peekElemOff p_arr i
+  loadArg p i tot
 
 raiseBadNArgs :: CInt -> Int64 -> Py (Ptr PyObject)
-raiseBadNArgs tot n = Py [CU.block| PyObject* {
+raiseBadNArgs expected got = Py [CU.block| PyObject* {
   char err[256];
-  sprintf(err, "Function takes exactly %i arguments (%li given)", $(int tot), $(int64_t n));
+  sprintf(err, "Function takes exactly %i arguments (%li given)", $(int expected), $(int64_t got));
   PyErr_SetString(PyExc_TypeError, err);
   return NULL;
   } |]

@@ -4,6 +4,7 @@ module Python.Internal.Program
     -- * Control flow
   , abort
   , abortM
+  , checkNull
   , finallyProg
   , onExceptionProg
     -- * Allocators
@@ -39,6 +40,12 @@ abort r = ContT $ \_ -> pure r
 -- | Early exit from continuation monad.
 abortM :: Monad m => m r -> ContT r m a
 abortM m = ContT $ \_ -> m
+
+-- | If result of computation is NULL return NULL immediately.
+checkNull :: Py (Ptr a) -> Program (Ptr a) (Ptr a)
+checkNull action = ContT $ \cnt -> action >>= \case
+  NULL -> pure nullPtr
+  p    -> cnt p
 
 -- | Evaluate finalizer even if exception is thrown.
 finallyProg

@@ -60,4 +60,25 @@ tests = testGroup "Run python"
         except NameError:
             pass
         |]
+  , testCase "Import py_->any" $ do
+      [py_|
+        import sys
+        sys
+        |]
+      -- Not visible
+      throwsPy $ void [pye| sys |]
+      [py_|
+        try:
+            sys
+            assert False, "sys shouln't be visible (1)"
+        except NameError:
+            pass
+        |]
+      [pymain|
+        try:
+            sys
+            assert False, "sys shouln't be visible (2)"
+        except NameError:
+            pass
+        |]
   ]
