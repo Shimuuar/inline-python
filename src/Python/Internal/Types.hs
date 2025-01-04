@@ -68,7 +68,6 @@ instance Exception PyError
 newtype Py a = Py (IO a)
   deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail)
 -- See NOTE: [Python and threading]
--- See NOTE: [Async exceptions]
 
 catchPy :: forall e a. Exception e => Py a -> (e -> Py a) -> Py a
 catchPy = coerce (catch @e @a)
