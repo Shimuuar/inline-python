@@ -293,10 +293,8 @@ instance (FromPy a, Show a, ToPy b) => ToPy (a -> IO b) where
         Right a            -> pure a
       liftIO $ unPy . basicToPy =<< f a
     --
-    [CU.block| PyObject* {
-      inline_py_callback_METH_O(
-          $(PyObject* (*f_ptr)(PyObject*, PyObject*)));
-      }|]
+    [CU.exp| PyObject* { inline_py_callback_METH_O($(PyCFunction f_ptr)) } |]
+
 
 instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
   basicToPy f = Py $ do
@@ -307,10 +305,7 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
       b <- loadArgFastcall p_arr 1 n
       liftIO $ unPy . basicToPy =<< f a b
     -- Create python function
-    [C.block| PyObject* {
-      PyCFunctionFast impl = $(PyObject* (*f_ptr)(PyObject*, PyObject*const*, int64_t));
-      return inline_py_callback_METH_FASTCALL(impl);
-      }|]
+    [C.exp| PyObject* { inline_py_callback_METH_FASTCALL($(PyCFunctionFast f_ptr)) } |]
 
 loadArgFastcall :: FromPy a => Ptr (Ptr PyObject) -> Int -> Int64 -> Program (Ptr PyObject) a
 loadArgFastcall p_arr i tot = do

@@ -27,6 +27,7 @@ module Python.Internal.Types
 import Control.Exception
 import Control.Monad.IO.Class
 import Data.Coerce
+import Data.Int
 import Data.Map.Strict           qualified as Map
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -89,7 +90,12 @@ tryPy = coerce (try @e @a)
 pyCtx :: Context
 pyCtx = mempty { ctxTypesTable = Map.fromList tytabs } where
   tytabs =
-    [ (TypeName "PyObject", [t| PyObject |])
+    [ ( TypeName "PyObject"
+      , [t| PyObject |])
+    , ( TypeName "PyCFunction"
+      , [t| FunPtr (Ptr PyObject -> Ptr PyObject -> IO (Ptr PyObject)) |])
+    , ( TypeName "PyCFunctionFast"
+      , [t| FunPtr (Ptr PyObject -> Ptr (Ptr PyObject) -> Int64 -> IO (Ptr PyObject)) |])
     ]
 
 
