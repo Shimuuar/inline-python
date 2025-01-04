@@ -98,7 +98,6 @@ pyEvalExpr p_globals p_locals src = evalContT $ do
     if( PyErr_Occurred() ) {
         return IPY_ERR_PYTHON;
     }
-    Py_INCREF(r);
     *$(PyObject **p_res) = r;
     return IPY_OK;
     }|]

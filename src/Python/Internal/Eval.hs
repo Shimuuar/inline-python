@@ -94,6 +94,9 @@ C.include "<inline-python.h>"
 --  2. Overhead of `runInBoundThread` is significant for GC (~1μs)
 --     will this cause problem or if there're only few object on
 --     haskell heap it would be fine?
+--
+-- In addition we must not do anything after interpreter shutdown.
+-- It already released memory. Most of it at least.
 
 
 
@@ -272,19 +275,16 @@ takeOwnership p = ContT $ \c -> c p `finallyPy` decref p
 
 -- | Wrap raw python object into
 newPyObject :: Ptr PyObject -> Py PyObject
--- We need to use different implementation for different RTS
 -- See NOTE: [GC]
-newPyObject p
-  | rtsSupportsBoundThreads = Py $ do
-      fptr <- newForeignPtr_ p
-      GHC.addForeignPtrFinalizer fptr $ runInBoundThread $ unPy $ decref p
-      pure $ PyObject fptr
-  | otherwise = Py $ do
-      fptr <- newForeignPtr_ p
-      PyObject fptr <$ addForeignPtrFinalizer py_XDECREF fptr
-
-py_XDECREF :: FunPtr (Ptr PyObject -> IO ())
-py_XDECREF = [C.funPtr| void inline_py_XDECREF(PyObject* p) { Py_XDECREF(p); } |]
+newPyObject p = Py $ do
+  fptr <- newForeignPtr_ p
+  -- FIXME: We still have race between check and interpreter
+  --        shutdown. At least it's narrow race
+  GHC.addForeignPtrFinalizer fptr $ do
+    [CU.exp| int { Py_IsInitialized() } |] >>= \case
+        0 -> pure ()
+        _ -> runPy $ decref p
+  pure $ PyObject fptr
 
 
 
