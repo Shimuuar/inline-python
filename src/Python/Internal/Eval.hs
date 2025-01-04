@@ -274,7 +274,8 @@ doInializePython = do
       PyStatus status;
       PyConfig cfg;
       PyConfig_InitPythonConfig( &cfg );
-      cfg.parse_argv = 0;
+      cfg.parse_argv              = 0;
+      cfg.install_signal_handlers = 0;
       //----------------
       status = PyConfig_SetBytesString(&cfg, &cfg.program_name, "XX");
       if( PyStatus_Exception(status) ) {
