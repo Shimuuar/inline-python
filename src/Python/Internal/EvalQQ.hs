@@ -5,13 +5,13 @@ module Python.Internal.EvalQQ
   ( -- * Evaluators and QQ
     pyExecExpr
   , pyEvalExpr
+  , evaluatorPymain
+  , evaluatorPy_
+  , evaluatorPye
+  , evaluatorPyf
+    -- * Code generation
   , expQQ
   , Mode(..)
-  , basicNewDict
-  , basicMainDict
-  , basicBindInDict
-  , getFunctionObject
-  , callFunctionObject
   ) where
 
 import Control.Monad.IO.Class
@@ -100,6 +100,40 @@ pyEvalExpr p_globals p_locals src = evalContT $ do
     newPyObject p_res
 
 
+evaluatorPymain :: (Ptr PyObject -> Py String) -> Py ()
+evaluatorPymain getSource = do
+  p_main <- basicMainDict
+  src    <- getSource p_main
+  pyExecExpr p_main p_main src
+
+evaluatorPy_ :: (Ptr PyObject -> Py String) -> Py ()
+evaluatorPy_ getSource = evalContT $ do
+  p_globals <- lift basicMainDict
+  p_locals  <- takeOwnership =<< lift basicNewDict
+  lift $ pyExecExpr p_globals p_locals =<< getSource p_locals
+
+evaluatorPye :: (Ptr PyObject -> Py String) -> Py PyObject
+evaluatorPye getSource = evalContT $ do
+  p_globals <- lift basicMainDict
+  p_locals  <- takeOwnership =<< lift basicNewDict
+  lift $ pyEvalExpr p_globals p_locals =<< getSource p_locals
+
+evaluatorPyf :: (Ptr PyObject -> Py String) -> Py PyObject
+evaluatorPyf getSource = evalContT $ do
+  p_globals <- lift basicMainDict
+  p_locals  <- takeOwnership =<< lift basicNewDict
+  p_kwargs  <- takeOwnership =<< lift basicNewDict
+  lift $ do
+    -- Create function in p_locals
+    pyExecExpr p_globals p_locals =<< getSource p_kwargs
+    -- Look up function
+    p_fun <- getFunctionObject p_locals >>= \case
+      NULL -> error "INTERNAL ERROR: _inline_python_ must be present"
+      p    -> pure p
+    -- Call python function we just constructed
+    callFunctionObject p_fun p_kwargs >>= \case
+      NULL  -> throwPy =<< convertPy2Haskell
+      p_res -> newPyObject p_res
 
 
 basicBindInDict :: ToPy a => String -> a -> Ptr PyObject -> Py ()

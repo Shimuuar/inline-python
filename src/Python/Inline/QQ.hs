@@ -10,13 +10,11 @@ module Python.Inline.QQ
   , pyf
   ) where
 
-import Control.Monad.Trans.Cont
-import Control.Monad.Trans.Class
 import Language.Haskell.TH.Quote
 
 import Python.Internal.EvalQQ
 import Python.Internal.Eval
-import Python.Internal.Types
+
 
 -- | Evaluate python code in context of main module. All variables
 --   defined in this block will remain visible. This quasiquote
@@ -25,11 +23,7 @@ import Python.Internal.Types
 --   This quote creates object of type @IO ()@
 pymain :: QuasiQuoter
 pymain = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ do
-      p_main <- basicMainDict
-      src    <- $(expQQ Exec txt) p_main
-      pyExecExpr p_main p_main src
-      |]
+  { quoteExp  = \txt -> [| runPy $ evaluatorPymain $(expQQ Exec txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -42,13 +36,7 @@ pymain = QuasiQuoter
 --   This quote creates object of type @IO ()@
 py_ :: QuasiQuoter
 py_ = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ evalContT $ do
-      p_globals <- lift basicMainDict
-      p_locals  <- takeOwnership =<< lift basicNewDict
-      lift $ do
-        src <- $(expQQ Exec txt) p_locals
-        pyExecExpr p_globals p_locals src
-      |]
+  { quoteExp  = \txt -> [| runPy $ evaluatorPy_ $(expQQ Exec txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -60,13 +48,7 @@ py_ = QuasiQuoter
 --   This quote creates object of type @IO PyObject@
 pye :: QuasiQuoter
 pye = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ evalContT $ do
-      p_globals <- lift basicMainDict
-      p_locals  <- takeOwnership =<< lift basicNewDict
-      lift $ do
-        src <- $(expQQ Eval txt) p_locals
-        pyEvalExpr p_globals p_locals src
-      |]
+  { quoteExp  = \txt -> [| runPy $ evaluatorPye $(expQQ Eval txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -78,23 +60,7 @@ pye = QuasiQuoter
 --   call return
 pyf :: QuasiQuoter
 pyf = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ evalContT $ do
-      p_globals <- lift basicMainDict
-      p_locals  <- takeOwnership =<< lift basicNewDict
-      p_kwargs  <- takeOwnership =<< lift basicNewDict
-      lift $ do
-        -- Create function in p_locals
-        src <- $(expQQ Fun txt) p_kwargs
-        pyExecExpr p_globals p_locals src
-        -- Look up function
-        p_fun <- getFunctionObject p_locals >>= \case
-          NULL -> error "INTERNAL ERROR: _inline_python_ must be present"
-          p    -> pure p
-        -- Call python function we just constructed
-        callFunctionObject p_fun p_kwargs >>= \case
-          NULL  -> throwPy =<< convertPy2Haskell
-          p_res -> newPyObject p_res
-      |]
+  { quoteExp  = \txt -> [| runPy $ evalutorPyf $(expQQ Fun txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
