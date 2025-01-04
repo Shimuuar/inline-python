@@ -287,10 +287,7 @@ instance (FromPy a, Show a, ToPy b) => ToPy (a -> IO b) where
   basicToPy f = Py $ do
     -- C function pointer for callback
     f_ptr <- wrapO $ \_ p_a -> pyCallback $ do
-      a <- lift (tryPy (basicFromPy p_a)) >>= \case
-        Left  FromPyFailed -> abortM $ raiseUndecodedArg 1 1
-        Left  e            -> lift   $ throwPy e
-        Right a            -> pure a
+      a <- loadArg p_a 0 1
       liftIO $ unPy . basicToPy =<< f a
     --
     [CU.exp| PyObject* { inline_py_callback_METH_O($(PyCFunction f_ptr)) } |]
@@ -316,26 +313,39 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
 pyCallback :: Program (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
 pyCallback io = unPy $ ensureGIL $ evalContT io `catchPy` convertHaskell2Py
 
-loadArgFastcall :: FromPy a => Ptr (Ptr PyObject) -> Int -> Int64 -> Program (Ptr PyObject) a
+-- | Load argument from python object for haskell evaluation
+loadArg
+  :: FromPy a
+  => (Ptr PyObject) -- ^ Python object to decode
+  -> Int            -- ^ Argument number (0-based)
+  -> Int64          -- ^ Total number of arguments
+  -> Program (Ptr PyObject) a
+loadArg p (fromIntegral -> i) (fromIntegral -> tot) = ContT $ \success -> do
+  tryPy (basicFromPy p) >>= \case
+    Right a            -> success a
+    Left  FromPyFailed -> Py [CU.block| PyObject* {
+      char err[256];
+      sprintf(err, "Failed to decode function argument %i of %li", $(int i)+1, $(int64_t tot));
+      PyErr_SetString(PyExc_TypeError, err);
+      return NULL;
+      } |]
+    Left  e            -> throwPy e
+
+-- | Load i-th argument from array as haskell parameter
+loadArgFastcall
+  :: FromPy a
+  => Ptr (Ptr PyObject) -- ^ Array of arguments
+  -> Int                -- ^ Argument number (0-based)
+  -> Int64              -- ^ Total number of arguments
+  -> Program (Ptr PyObject) a
 loadArgFastcall p_arr i tot = do
   p <- liftIO $ peekElemOff p_arr i
-  lift (tryPy (basicFromPy p)) >>= \case
-    Right a            -> pure a
-    Left  FromPyFailed -> abortM $ raiseUndecodedArg (fromIntegral i + 1) (fromIntegral tot)
-    Left  e            -> lift   $ throwPy e
-
-raiseUndecodedArg :: CInt -> CInt -> Py (Ptr PyObject)
-raiseUndecodedArg n tot = Py [CU.block| PyObject* {
-  char err[256];
-  sprintf(err, "Failed to decode function argument %i of %i", $(int n), $(int tot));
-  PyErr_SetString(PyExc_TypeError, err);
-  return NULL;
-  } |]
+  loadArg p i tot
 
 raiseBadNArgs :: CInt -> Int64 -> Py (Ptr PyObject)
-raiseBadNArgs tot n = Py [CU.block| PyObject* {
+raiseBadNArgs expected got = Py [CU.block| PyObject* {
   char err[256];
-  sprintf(err, "Function takes exactly %i arguments (%li given)", $(int tot), $(int64_t n));
+  sprintf(err, "Function takes exactly %i arguments (%li given)", $(int expected), $(int64_t got));
   PyErr_SetString(PyExc_TypeError, err);
   return NULL;
   } |]
