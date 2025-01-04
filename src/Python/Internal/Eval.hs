@@ -15,6 +15,7 @@ module Python.Internal.Eval
     -- * PyObject wrapper
   , newPyObject
   , decref
+  , incref
   , takeOwnership
   , ensureGIL
   , dropGIL
@@ -22,7 +23,10 @@ module Python.Internal.Eval
   , convertHaskell2Py
   , convertPy2Haskell
   , throwPyError
+  , mustThrowPyError
   , throwPyConvesionFailed
+    -- * Debugging
+  , debugPrintPy
   ) where
 
 import Control.Concurrent
@@ -91,6 +95,9 @@ C.include "<inline-python.h>"
 --  2. Overhead of `runInBoundThread` is significant for GC (~1μs)
 --     will this cause problem or if there're only few object on
 --     haskell heap it would be fine?
+--
+-- In addition we must not do anything after interpreter shutdown.
+-- It already released memory. Most of it at least.
 
 
 
@@ -241,6 +248,9 @@ doFinalizePython = [C.block| void {
 decref :: Ptr PyObject -> Py ()
 decref p = Py [CU.exp| void { Py_DECREF($(PyObject* p)) } |]
 
+incref :: Ptr PyObject -> Py ()
+incref p = Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
+
 -- | Ensure that we hold GIL for duration of action
 ensureGIL :: Py a -> Py a
 ensureGIL action = do
@@ -266,19 +276,16 @@ takeOwnership p = ContT $ \c -> c p `finallyPy` decref p
 
 -- | Wrap raw python object into
 newPyObject :: Ptr PyObject -> Py PyObject
--- We need to use different implementation for different RTS
 -- See NOTE: [GC]
-newPyObject p
-  | rtsSupportsBoundThreads = Py $ do
-      fptr <- newForeignPtr_ p
-      GHC.addForeignPtrFinalizer fptr $ runInBoundThread $ unPy $ decref p
-      pure $ PyObject fptr
-  | otherwise = Py $ do
-      fptr <- newForeignPtr_ p
-      PyObject fptr <$ addForeignPtrFinalizer py_XDECREF fptr
-
-py_XDECREF :: FunPtr (Ptr PyObject -> IO ())
-py_XDECREF = [C.funPtr| void inline_py_XDECREF(PyObject* p) { Py_XDECREF(p); } |]
+newPyObject p = Py $ do
+  fptr <- newForeignPtr_ p
+  -- FIXME: We still have race between check and interpreter
+  --        shutdown. At least it's narrow race
+  GHC.addForeignPtrFinalizer fptr $ do
+    [CU.exp| int { Py_IsInitialized() } |] >>= \case
+        0 -> pure ()
+        _ -> runPy $ decref p
+  pure $ PyObject fptr
 
 
 
@@ -348,6 +355,14 @@ throwPyError =
     NULL -> pure ()
     _    -> throwPy =<< convertPy2Haskell
 
+-- | Throw python error as haskell exception if it's raised. If it's
+--   not that internal error. Another exception will be raised
+mustThrowPyError :: String -> Py a
+mustThrowPyError msg =
+  Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
+    NULL -> error $ "mustThrowPyError: no python exception raised. " ++ msg
+    _    -> throwPy =<< convertPy2Haskell
+
 throwPyConvesionFailed :: Py ()
 throwPyConvesionFailed = do
   r <- Py [CU.block| int {
@@ -360,3 +375,14 @@ throwPyConvesionFailed = do
   case r of
     0 -> pure ()
     _ -> throwPy FromPyFailed
+
+
+----------------------------------------------------------------
+-- Debugging
+----------------------------------------------------------------
+
+debugPrintPy :: Ptr PyObject -> Py ()
+debugPrintPy p = Py [CU.block| void {
+  PyObject_Print($(PyObject *p), stdout, 0);
+  printf(" [REF=%li]\n", Py_REFCNT($(PyObject *p)) );
+  } |]

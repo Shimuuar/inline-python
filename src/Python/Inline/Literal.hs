@@ -109,12 +109,9 @@ toPy a = runPy $ basicToPy a >>= \case
 ----------------------------------------------------------------
 
 instance ToPy PyObject where
-  basicToPy o = unsafeWithPyObject o $ \p ->
-    p <$ Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
+  basicToPy o = unsafeWithPyObject o $ \p -> p <$ incref p
 instance FromPy PyObject where
-  basicFromPy p = do
-    Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
-    newPyObject p
+  basicFromPy p = incref p >> newPyObject p
 
 instance ToPy () where
   basicToPy () = Py [CU.exp| PyObject* { Py_None } |]

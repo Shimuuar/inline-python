@@ -7,6 +7,7 @@ module Python.Inline.QQ
   ( pymain
   , py_
   , pye
+  , pyf
   ) where
 
 import Language.Haskell.TH.Quote
@@ -22,10 +23,7 @@ import Python.Internal.Eval
 --   This quote creates object of type @IO ()@
 pymain :: QuasiQuoter
 pymain = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ do p_main <- basicMainDict
-                                      src   <- $(expQQ "exec" (unindent txt)) p_main
-                                      pyEvalInMain p_main p_main src
-                         |]
+  { quoteExp  = \txt -> [| runPy $ evaluatorPymain $(expQQ Exec txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -38,13 +36,7 @@ pymain = QuasiQuoter
 --   This quote creates object of type @IO ()@
 py_ :: QuasiQuoter
 py_ = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ do p_globals <- basicMainDict
-                                      p_locals  <- basicNewDict
-                                      src   <- $(expQQ "exec" (unindent txt)) p_locals
-                                      res   <- pyEvalInMain p_globals p_locals src
-                                      basicDecref p_locals
-                                      return res
-                         |]
+  { quoteExp  = \txt -> [| runPy $ evaluatorPy_ $(expQQ Exec txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -56,12 +48,19 @@ py_ = QuasiQuoter
 --   This quote creates object of type @IO PyObject@
 pye :: QuasiQuoter
 pye = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ do p_env <- basicNewDict
-                                      src   <- $(expQQ "eval" (unindent txt)) p_env
-                                      res   <- pyEvalExpr p_env src
-                                      basicDecref p_env
-                                      return res
-                         |]
+  { quoteExp  = \txt -> [| runPy $ evaluatorPye $(expQQ Eval txt) |]
+  , quotePat  = error "quotePat"
+  , quoteType = error "quoteType"
+  , quoteDec  = error "quoteDec"
+  }
+
+-- | Another quasiquoter which works around that sequence of python
+--   statements doesn't have any value associated with it.  Content of
+--   quasiquote is function body. So to get value out of it one must
+--   call return
+pyf :: QuasiQuoter
+pyf = QuasiQuoter
+  { quoteExp  = \txt -> [| runPy $ evaluatorPyf $(expQQ Fun txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
