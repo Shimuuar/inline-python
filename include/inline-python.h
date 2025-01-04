@@ -5,17 +5,10 @@
 #include <Rts.h>
 
 
-// Use new stable API from 
+// Use new stable API from 3.13
 #ifndef PyCFunctionFast
 typedef _PyCFunctionFast PyCFunctionFast;
 #endif
-
-// ----------------------------------------------------------------
-// Standard status codes
-
-#define IPY_OK          0
-#define IPY_ERR_PYTHON  1
-#define IPY_ERR_COMPILE 2
 
 
 

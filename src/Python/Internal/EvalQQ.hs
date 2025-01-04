@@ -25,7 +25,6 @@ import Data.Text                 qualified as T
 import Data.Text.Encoding        qualified as T
 import Foreign.C.Types
 import Foreign.Ptr
-import Foreign.Storable
 import System.Exit
 import System.Process (readProcessWithExitCode)
 
@@ -58,22 +57,22 @@ pyExecExpr
   -> String       -- ^ Python source code
   -> Py ()
 pyExecExpr p_globals p_locals src = evalContT $ do
-  p_py  <- withPyCString src
-  r     <- liftIO [C.block| int {
-    PyObject* globals = $(PyObject* p_globals);
-    PyObject* locals  = $(PyObject* p_locals);
-    // Compile code
-    PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_file_input);
-    if( PyErr_Occurred() ){
-        return IPY_ERR_COMPILE;
-    }
-    // Execute statements
-    PyObject* res = PyEval_EvalCode(code, globals, locals);
-    Py_XDECREF(res);
-    Py_DECREF(code);
-    return PyErr_Occurred() ? IPY_ERR_PYTHON : IPY_OK;
-    } |]
-  lift $ finiEval r (pure ())
+  p_py <- withPyCString src
+  lift $ do
+    Py [C.block| void {
+      PyObject* globals = $(PyObject* p_globals);
+      PyObject* locals  = $(PyObject* p_locals);
+      // Compile code
+      PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_file_input);
+      if( PyErr_Occurred() ){
+          return;
+      }
+      // Execute statements
+      PyObject* res = PyEval_EvalCode(code, globals, locals);
+      Py_XDECREF(res);
+      Py_DECREF(code);
+      } |]
+    throwPyError
 
 -- | Evaluate expression with fresh local environment
 pyEvalExpr
@@ -83,36 +82,25 @@ pyEvalExpr
   -> Py PyObject
 pyEvalExpr p_globals p_locals src = evalContT $ do
   p_py  <- withPyCString src
-  p_res <- withPyAlloca @(Ptr PyObject)
-  r     <- liftIO [C.block| int {
-    PyObject* globals = $(PyObject* p_globals);
-    PyObject* locals  = $(PyObject* p_locals);
-    // Compile code
-    PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_eval_input);
-    if( PyErr_Occurred() ) {
-        return IPY_ERR_COMPILE;
-    }
-    // Evaluate expression
-    PyObject* r = PyEval_EvalCode(code, globals, locals);
-    Py_DECREF(code);
-    if( PyErr_Occurred() ) {
-        return IPY_ERR_PYTHON;
-    }
-    *$(PyObject **p_res) = r;
-    return IPY_OK;
-    }|]
-  lift $ finiEval r (newPyObject =<< liftIO (peek p_res))
+  lift $ do
+    p_res <- Py [C.block| PyObject* {
+      PyObject* globals = $(PyObject* p_globals);
+      PyObject* locals  = $(PyObject* p_locals);
+      // Compile code
+      PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_eval_input);
+      if( PyErr_Occurred() ) {
+          return NULL;
+      }
+      // Evaluate expression
+      PyObject* r = PyEval_EvalCode(code, globals, locals);
+      Py_DECREF(code);
+      return r;
+      }|]
+    throwPyError
+    newPyObject p_res
 
--- | Convert evaluation result and
-finiEval
-  :: CInt
-  -> Py a
-  -> Py a
-finiEval r fini = case r of
-  IPY_OK          -> fini
-  IPY_ERR_COMPILE -> throwPy =<< convertPy2Haskell
-  IPY_ERR_PYTHON  -> throwPy =<< convertPy2Haskell
-  _ -> error $ "pyEvalStr: unexpected error: " ++ show r
+
+
 
 basicBindInDict :: ToPy a => String -> a -> Ptr PyObject -> Py ()
 basicBindInDict name a p_dict = evalContT $ do
