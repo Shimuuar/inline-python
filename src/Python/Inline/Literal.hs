@@ -77,21 +77,23 @@ class FromPy a where
   --   with python's C API. Otherwise 'fromPy' is preferred.
   basicFromPy :: Ptr PyObject -> Py a
 
--- | Convert python object to haskell value
+-- | Convert python object to haskell value. All python exceptions
+--   which happen during execution will be converted to @PyError@.
 fromPyEither :: FromPy a => PyObject -> IO (Either PyError a)
 fromPyEither py = runPy $ unsafeWithPyObject py $ \p ->
   (Right <$> basicFromPy p) `catchPy` (pure . Left)
 
 
--- | Convert python object to haskell value. Python exception raised
---   during execution are thrown as exceptions
+-- | Convert python object to haskell value. Will return @Nothing@ if
+--   'FromPyFailed' is thrown. Other python exceptions are rethrown.
 fromPy :: FromPy a => PyObject -> IO (Maybe a)
 fromPy py = runPy $ unsafeWithPyObject py $ \p ->
   (Just <$> basicFromPy p) `catchPy` \case
     FromPyFailed -> pure Nothing
     e            -> throwPy e
 
--- | Convert python object to haskell value. Throws exception on failure
+-- | Convert python object to haskell value. Throws exception on
+--   failure.
 fromPy' :: FromPy a => PyObject -> IO a
 fromPy' py = runPy $ unsafeWithPyObject py basicFromPy
 

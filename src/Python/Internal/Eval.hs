@@ -139,8 +139,8 @@ unPy (Py io) = io
 -- Initialization of interpreter
 ----------------------------------------------------------------
 
--- | Initialize python interpreter. It's safe call this function
---   multiple times.
+-- | Initialize python interpreter. If interpreter is already
+--   initialized it's a noop.
 initializePython :: IO ()
 -- See NOTE: [Python and threading]
 initializePython

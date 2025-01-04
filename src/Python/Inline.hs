@@ -1,16 +1,19 @@
 -- |
 module Python.Inline
-  ( initializePython
+  ( -- * Interpreter initialization
+    initializePython
   , finalizePython
   , withPython
+    -- * Core data types
   , PyObject
   , PyError(..)
-  , ToPy(..)
-  , FromPy(..)
+    -- * Conversion between haskell and python
   , toPy
   , fromPyEither
   , fromPy
   , fromPy'
+  , ToPy
+  , FromPy
   ) where
 
 

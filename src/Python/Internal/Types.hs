@@ -8,6 +8,7 @@
 module Python.Internal.Types
   ( -- * Data type
     PyObject(..)
+  , unsafeWithPyObject
   , PyError(..)
   , Py(..)
   , catchPy
@@ -30,8 +31,9 @@ import Data.Coerce
 import Data.Int
 import Data.Map.Strict           qualified as Map
 import Foreign.Ptr
-import Foreign.ForeignPtr
 import Foreign.C.Types
+import GHC.ForeignPtr
+
 import Language.C.Types
 import Language.C.Inline.Context
 
@@ -44,7 +46,10 @@ import Language.C.Inline.Context
 --   it could only be accessed only in IO monad.
 newtype PyObject = PyObject (ForeignPtr PyObject)
 
--- | Python exception converted to haskell
+unsafeWithPyObject :: forall a. PyObject -> (Ptr PyObject -> Py a) -> Py a
+unsafeWithPyObject = coerce (unsafeWithForeignPtr @PyObject @a)
+
+-- | Python exception converted to haskell.
 data PyError
   = PyError String String
     -- ^ Python exception. Contains exception type and message as strings.
@@ -59,12 +64,12 @@ instance Exception PyError
 
 
 -- | Monad for code which is interacts directly with python
---   interpreter. One could assume that code in this monad executes
---   with async exceptions masked.
+--   interpreter. During its execution python global interpreter lock
+--   (GIL) is held, async exceptions are masked. It's also always
+--   executed on bound thread if RTS supports one.
 --
---   We need to treat code interacting with python interpreter
---   differently from plain @IO@ since it must be executed in single OS
---   threads. On other hand lifting @IO@ to @Py@ is safe.
+--   It's needed in order to distinguish between code that needs such
+--   guarantees and plain IO.
 newtype Py a = Py (IO a)
   deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail)
 -- See NOTE: [Python and threading]
