@@ -15,6 +15,7 @@ module Python.Internal.Eval
     -- * PyObject wrapper
   , newPyObject
   , decref
+  , incref
   , takeOwnership
   , ensureGIL
   , dropGIL
@@ -240,6 +241,9 @@ doFinalizePython = [C.block| void {
 
 decref :: Ptr PyObject -> Py ()
 decref p = Py [CU.exp| void { Py_DECREF($(PyObject* p)) } |]
+
+incref :: Ptr PyObject -> Py ()
+incref p = Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
 
 -- | Ensure that we hold GIL for duration of action
 ensureGIL :: Py a -> Py a
