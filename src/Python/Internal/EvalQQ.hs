@@ -168,7 +168,9 @@ data Mode
 expQQ :: Mode   -- ^ Python evaluation mode: @exec@/@eval@
       -> String -- ^ Python source code
       -> TH.Q TH.Exp
-expQQ mode src = do
+expQQ mode qq_src = do
+  -- We need to preprocess before passing it to python.
+  let src = prepareSource mode qq_src
   antis  <- liftIO $ do
     -- We've embedded script into library and we need to pass source
     -- code of QQ to a script. It can contain whatever symbols so to
@@ -211,6 +213,11 @@ chop name = take (length name - length antiSuffix) name
 ----------------------------------------------------------------
 -- Python source code transform
 ----------------------------------------------------------------
+
+prepareSource :: Mode -> String -> String
+prepareSource = \case
+  Eval -> dropWhile isSpace
+  Exec -> unindent
 
 -- Python is indentation based and quasiquotes do not strip leading
 -- space. We have to do that ourself

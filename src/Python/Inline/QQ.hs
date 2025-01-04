@@ -23,7 +23,7 @@ import Python.Internal.Eval
 pymain :: QuasiQuoter
 pymain = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_main <- basicMainDict
-                                      src   <- $(expQQ Exec (unindent txt)) p_main
+                                      src   <- $(expQQ Exec txt) p_main
                                       pyEvalInMain p_main p_main src
                          |]
   , quotePat  = error "quotePat"
@@ -40,7 +40,7 @@ py_ :: QuasiQuoter
 py_ = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_globals <- basicMainDict
                                       p_locals  <- basicNewDict
-                                      src   <- $(expQQ Exec (unindent txt)) p_locals
+                                      src   <- $(expQQ Exec txt) p_locals
                                       res   <- pyEvalInMain p_globals p_locals src
                                       basicDecref p_locals
                                       return res
@@ -57,7 +57,7 @@ py_ = QuasiQuoter
 pye :: QuasiQuoter
 pye = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_env <- basicNewDict
-                                      src   <- $(expQQ Eval (unindent txt)) p_env
+                                      src   <- $(expQQ Eval txt) p_env
                                       res   <- pyEvalExpr p_env src
                                       basicDecref p_env
                                       return res
