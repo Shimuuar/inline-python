@@ -354,24 +354,24 @@ instance (FromPy a) => FromPy [a] where
 
 instance (FromPy a, Show a, ToPy b) => ToPy (a -> IO b) where
   basicToPy f = Py $ do
-    -- C function pointer for callback
+    --
     f_ptr <- wrapO $ \_ p_a -> pyCallback $ do
       a <- loadArg p_a 0 1
-      liftIO $ unPy . basicToPy =<< f a
+      lift $ basicToPy =<< dropGIL (f a)
     --
     [CU.exp| PyObject* { inline_py_callback_METH_O($(PyCFunction f_ptr)) } |]
 
 
 instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
   basicToPy f = Py $ do
-    -- Create haskell function
+    --
     f_ptr <- wrapFastcall $ \_ p_arr n -> pyCallback $ do
       when (n /= 2) $ abortM $ raiseBadNArgs 2 n
-      a <- loadArgFastcall p_arr 0 n
-      b <- loadArgFastcall p_arr 1 n
-      liftIO $ unPy . basicToPy =<< f a b
-    -- Create python function
-    [C.exp| PyObject* { inline_py_callback_METH_FASTCALL($(PyCFunctionFast f_ptr)) } |]
+      a1 <- loadArgFastcall p_arr 0 n
+      a2 <- loadArgFastcall p_arr 1 n
+      lift $ basicToPy =<< dropGIL (f a1 a2)
+    --
+    [CU.exp| PyObject* { inline_py_callback_METH_FASTCALL($(PyCFunctionFast f_ptr)) } |]
 
 ----------------------------------------------------------------
 -- Helpers
