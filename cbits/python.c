@@ -11,17 +11,13 @@
 // reacquire GIL there.
 // ================================================================
 
-int inline_py_callback_depth = 0;
-
 static PyObject* callback_METH_O(PyObject* self, PyObject* arg) {
     PyObject    *res;
     PyCFunction *fun = PyCapsule_GetPointer(self, NULL);
     //--
-    inline_py_callback_depth++;
 Py_BEGIN_ALLOW_THREADS
     res = (*fun)(self, arg);
 Py_END_ALLOW_THREADS
-    inline_py_callback_depth--;
     return res;
 }
 
@@ -29,11 +25,9 @@ static PyObject* callback_METH_FASTCALL(PyObject* self, PyObject** args, Py_ssiz
     PyObject        *res;
     PyCFunctionFast *fun = PyCapsule_GetPointer(self, NULL);
     //--
-    inline_py_callback_depth++;
 Py_BEGIN_ALLOW_THREADS
     res = (*fun)(self, args, nargs);
 Py_END_ALLOW_THREADS
-    inline_py_callback_depth--;
     return res;
 }
 
