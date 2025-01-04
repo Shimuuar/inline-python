@@ -3,7 +3,7 @@
 -- |
 module Python.Internal.EvalQQ
   ( -- * Evaluators and QQ
-    pyEvalInMain
+    pyExec
   , pyEvalExpr
   , expQQ
   , Mode(..)
@@ -51,12 +51,12 @@ C.include "<inline-python.h>"
 
 -- | Evaluate expression within context of @__main__@ module. All
 --   variables defined in this evaluator persist.
-pyEvalInMain
+pyExec
   :: Ptr PyObject -- ^ Globals
   -> Ptr PyObject -- ^ Locals
   -> String
   -> Py ()
-pyEvalInMain p_globals p_locals src = evalContT $ do
+pyExec p_globals p_locals src = evalContT $ do
   p_py  <- withPyCString src
   r     <- liftIO [C.block| int {
     PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_file_input);

@@ -24,7 +24,7 @@ pymain :: QuasiQuoter
 pymain = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_main <- basicMainDict
                                       src   <- $(expQQ Exec txt) p_main
-                                      pyEvalInMain p_main p_main src
+                                      pyExec p_main p_main src
                          |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
@@ -41,7 +41,7 @@ py_ = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_globals <- basicMainDict
                                       p_locals  <- basicNewDict
                                       src   <- $(expQQ Exec txt) p_locals
-                                      res   <- pyEvalInMain p_globals p_locals src
+                                      res   <- pyExec p_globals p_locals src
                                       decref p_locals
                                       return res
                          |]
