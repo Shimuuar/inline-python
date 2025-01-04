@@ -123,16 +123,23 @@ C.include "<inline-python.h>"
 runPy :: Py a -> IO a
 -- See NOTE: [Python and threading]
 runPy py
-  -- Multithreaded RTS
-  | rtsSupportsBoundThreads = runInBoundThread $ mask_ $ unPy $ ensureGIL py
-  -- Single-threaded RTS
-  | otherwise = mask_ $ unPy $ ensureGIL py
-
+  | rtsSupportsBoundThreads = runInBoundThread go -- Multithreaded RTS
+  | otherwise               = go                  -- Single-threaded RTS
+  where
+    -- We check whether interpreter is initialized. Throw exception if
+    -- it wasn't. Better than segfault isn't it?
+    go = mask_ $ checkInitialized >> unPy (ensureGIL py)
 
 -- | Execute python action. This function is unsafe and should be only
 --   called in thread of interpreter.
 unPy :: Py a -> IO a
 unPy (Py io) = io
+
+checkInitialized :: IO ()
+checkInitialized =
+  [CU.exp| int { Py_IsInitialized() } |] >>= \case
+    0 -> error "Python is not initialized"
+    _ -> pure ()
 
 
 
