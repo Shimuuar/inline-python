@@ -10,8 +10,8 @@ module Python.Internal.EvalQQ
   , basicNewDict
   , basicMainDict
   , basicBindInDict
-    -- * Python transformations
-  , unindent
+  , getFunctionObject
+  , callFunctionObject
   ) where
 
 import Control.Monad.IO.Class
@@ -19,6 +19,7 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.Cont
 import Data.Bits
 import Data.Char
+import Data.List                 (intercalate)
 import Data.ByteString           qualified as BS
 import Data.Text                 qualified as T
 import Data.Text.Encoding        qualified as T
@@ -144,6 +145,17 @@ basicMainDict = Py [CU.block| PyObject* {
   return PyModule_GetDict(main_module);
   }|]
 
+getFunctionObject :: Ptr PyObject -> Py (Ptr PyObject)
+getFunctionObject p_dict = do
+  Py [CU.exp| PyObject* { PyDict_GetItemString($(PyObject *p_dict), "_inline_python_") } |]
+
+callFunctionObject :: Ptr PyObject -> Ptr PyObject -> Py (Ptr PyObject)
+callFunctionObject fun kwargs = Py [CU.block| PyObject* {
+  PyObject* args = PyTuple_Pack(0);
+  return PyObject_Call($(PyObject *fun), args, $(PyObject *kwargs));
+  } |]
+
+
 
 ----------------------------------------------------------------
 -- TH generator
@@ -158,6 +170,7 @@ script = $( do let path = "py/bound-vars.py"
 data Mode
   = Eval
   | Exec
+  | Fun
 
 -- | Generate TH splice which updates python environment dictionary
 --   and returns python source code.
@@ -177,6 +190,7 @@ expQQ mode qq_src = do
         [ "-"
         , case mode of Eval -> "eval"
                        Exec -> "exec"
+                       Fun  -> "exec"
         ]
       $ unlines [ script
                 , "decode_and_print('" <>
@@ -216,17 +230,22 @@ prepareSource :: Mode -> String -> String
 prepareSource = \case
   Eval -> dropWhile isSpace
   Exec -> unindent
+  Fun  -> unindent
 
 prepareForVarLookup :: Mode -> String -> String
 prepareForVarLookup = \case
   Eval -> id
   Exec -> id
+  Fun  -> ("def __dummy__():\n"++) . indent
 
 prepareForEval :: Mode -> [String] -> String -> String
-prepareForEval mode _ = case mode of
-  Eval -> id
-  Exec -> id
-
+prepareForEval mode vars src = case mode of
+  Eval -> src
+  Exec -> src
+  Fun  -> "def _inline_python_("<>args<>"):\n"
+    <> indent src
+  where
+    args = intercalate "," vars
 
 -- Python is indentation based and quasiquotes do not strip leading
 -- space. We have to do that ourself
@@ -244,3 +263,8 @@ unindent py_src = case lines py_src of
       let non_empty = filter (any (not . isSpace)) ls
           n         = minimum [ length (takeWhile (==' ') s) | s <- non_empty ]
       in unlines $ drop n <$> ls
+
+indent :: String -> String
+indent = unlines
+       . map ("    "++)
+       . lines

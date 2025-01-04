@@ -7,13 +7,14 @@ module Python.Inline.QQ
   ( pymain
   , py_
   , pye
+  , pyf
   ) where
 
 import Language.Haskell.TH.Quote
 
 import Python.Internal.EvalQQ
 import Python.Internal.Eval
-
+import Python.Internal.Types
 
 -- | Evaluate python code in context of main module. All variables
 --   defined in this block will remain visible. This quasiquote
@@ -62,6 +63,32 @@ pye = QuasiQuoter
                                       decref p_env
                                       return res
                          |]
+  , quotePat  = error "quotePat"
+  , quoteType = error "quoteType"
+  , quoteDec  = error "quoteDec"
+  }
+
+
+
+--   This quote creates object of type @IO PyObject@
+pyf :: QuasiQuoter
+pyf = QuasiQuoter
+  { quoteExp  = \txt ->
+      [| runPy $ do p_globals <- basicMainDict
+                    p_locals  <- basicNewDict
+                    p_kwargs  <- basicNewDict
+                    src       <- $(expQQ Fun txt) p_kwargs
+                    pyExec p_globals p_locals src
+                    -- Now we need to look up _inline_python_ in p_env
+                    p_fun <- getFunctionObject p_locals >>= \case
+                      NULL -> error "INTERNAL ERROR: _inline_python_ must be present"
+                      p    -> pure p
+                    -- Call python function object
+                    r <- callFunctionObject p_fun p_kwargs
+                    case r of
+                      NULL -> throwPy =<< convertPy2Haskell
+                      _    -> newPyObject r
+       |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
