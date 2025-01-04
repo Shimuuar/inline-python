@@ -116,6 +116,9 @@ instance FromPy PyObject where
     Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
     newPyObject p
 
+instance ToPy () where
+  basicToPy () = Py [CU.exp| PyObject* { Py_None } |]
+
 instance ToPy CLong where
   basicToPy i = Py [CU.exp| PyObject* { PyLong_FromLong($(long i)) } |]
 instance FromPy CLong where
