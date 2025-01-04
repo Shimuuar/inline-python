@@ -138,17 +138,18 @@ evaluatorPyf getSource = evalContT $ do
 
 basicBindInDict :: ToPy a => String -> a -> Ptr PyObject -> Py ()
 basicBindInDict name a p_dict = evalContT $ do
-  -- FIXME: error handling
-  -- FIXME: meanining of errors in PyUnicode_DecodeUTF8?
-  (p_key,len) <- withPyCStringLen name
-  p_obj       <- lift $ basicToPy a
-  let c_len = fromIntegral len :: CLong
-  liftIO [C.block| void {
-    PyObject* p_obj = $(PyObject* p_obj);
-    PyObject* key   = PyUnicode_DecodeUTF8( $(char* p_key), $(long c_len), 0);
-    PyDict_SetItem($(PyObject* p_dict), key, p_obj);
-    Py_DECREF(p_obj);
-    } |]
+  (p_key) <- withPyCString name
+  p_obj   <- takeOwnership =<< lift (basicToPy a)
+  lift $ case p_obj of
+    NULL -> throwPyError
+    _    -> do
+      r <- Py [C.block| int {
+        PyObject* p_obj = $(PyObject* p_obj);
+        return PyDict_SetItemString($(PyObject* p_dict), $(char* p_key), p_obj);
+        } |]
+      case r of
+        0 -> pure ()
+        _ -> throwPyError
 
 basicNewDict :: Py (Ptr PyObject)
 basicNewDict = Py [CU.exp| PyObject* { PyDict_New() } |]
@@ -157,6 +158,8 @@ basicNewDict = Py [CU.exp| PyObject* { PyDict_New() } |]
 basicMainDict :: Py (Ptr PyObject)
 basicMainDict = Py [CU.block| PyObject* {
   PyObject* main_module = PyImport_AddModule("__main__");
+  if( PyErr_Occurred() )
+      return NULL;
   return PyModule_GetDict(main_module);
   }|]
 
