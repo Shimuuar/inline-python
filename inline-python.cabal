@@ -21,7 +21,6 @@ extra-doc-files:
   ChangeLog.md
 extra-source-files:
   include/inline-python.h
-data-files:
   py/bound-vars.py
 
 source-repository head
@@ -55,6 +54,8 @@ Library
                    , transformers     >=0.4
                    , inline-c         >=0.9.1
                    , template-haskell -any
+                   , text             >=2
+                   , bytestring
   hs-source-dirs:    src
   include-dirs:      include
   c-sources:         cbits/python.c
@@ -72,9 +73,6 @@ Library
     Python.Internal.Program
     Python.Internal.Types
     Python.Internal.Util
-    Paths_inline_python
-  Autogen-modules:
-    Paths_inline_python
 
 ----------------------------------------------------------------
 library test

@@ -17,7 +17,11 @@ module Python.Internal.EvalQQ
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Cont
+import Data.Bits
 import Data.Char
+import Data.ByteString           qualified as BS
+import Data.Text                 qualified as T
+import Data.Text.Encoding        qualified as T
 import Foreign.C.Types
 import Foreign.Ptr
 import Foreign.Storable
@@ -34,7 +38,7 @@ import Python.Internal.Types
 import Python.Internal.Program
 import Python.Internal.Eval
 import Python.Inline.Literal
-import Paths_inline_python (getDataFileName)
+
 
 ----------------------------------------------------------------
 C.context (C.baseCtx <> pyCtx)
@@ -148,6 +152,11 @@ basicDecref o = Py [CU.exp| void { Py_DECREF($(PyObject* o)) } |]
 -- TH generator
 ----------------------------------------------------------------
 
+script :: String
+script = $( do let path = "py/bound-vars.py"
+               TH.addDependentFile path
+               TH.lift =<< TH.runIO (readFile path)
+          )
 
 -- | Generate TH splice which updates python environment dictionary
 --   and returns python source code.
@@ -155,9 +164,20 @@ expQQ :: String -- ^ Python evaluation mode: @exec@/@eval@
       -> String -- ^ Python source code
       -> TH.Q TH.Exp
 expQQ mode src = do
-  script <- liftIO $ getDataFileName "py/bound-vars.py"
   antis  <- liftIO $ do
-    (code, stdout, stderr) <- readProcessWithExitCode "python" [script, mode] src
+    -- We've embedded script into library and we need to pass source
+    -- code of QQ to a script. It can contain whatever symbols so to
+    -- be safe it's base16 encode. This encoding is very simple and we
+    -- don't care much about efficiency here
+    (code, stdout, stderr) <- readProcessWithExitCode "python" ["-", mode]
+      $ unlines [ script
+                , "decode_and_print('" <>
+                  concat [ [ intToDigit $ fromIntegral (w `shiftR` 4)
+                           , intToDigit $ fromIntegral (w .&. 15) ]
+                         | w <- BS.unpack $ T.encodeUtf8 $ T.pack src
+                         ]
+                  <> "')"
+                ]
     case code of
       ExitSuccess   -> pure $ words stdout
       ExitFailure{} -> error stderr
