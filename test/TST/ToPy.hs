@@ -17,6 +17,12 @@ tests = testGroup "ToPy"
   , testCase "Tuple2" $
       let x = (1::Int, 333::Int)
       in [py_| assert x_hs == (1,333) |]
+  , testCase "Tuple3" $
+      let x = (1::Int, 333::Int, True)
+      in [py_| assert x_hs == (1,333,True) |]
+  , testCase "Tuple4" $
+      let x = (1::Int, 333::Int, True, 'c')
+      in [py_| assert x_hs == (1,333,True,'c') |]
   , testCase "nested Tuple2" $
       let x = (1::Int, (333::Int,4.5::Double))
       in [py_| assert x_hs == (1,(333,4.5)) |]

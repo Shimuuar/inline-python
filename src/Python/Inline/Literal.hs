@@ -229,12 +229,66 @@ instance (FromPy a, FromPy b) => FromPy (a,b) where
     lift $ do throwPyError
               when (unpack_ok /= 0) $ throwPy FromPyFailed
     -- Parse each element of tuple
-    p_a <- liftIO $ peekElemOff p_args 0
-    p_b <- liftIO $ peekElemOff p_args 1
-    finallyProg $ decref p_a >> decref p_b
+    p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
+    p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
     lift $ do a <- basicFromPy p_a
               b <- basicFromPy p_b
               pure (a,b)
+
+instance (ToPy a, ToPy b, ToPy c) => ToPy (a,b,c) where
+  basicToPy (a,b,c) = evalContT $ do
+    p_a <- takeOwnership =<< checkNull (basicToPy a)
+    p_b <- takeOwnership =<< checkNull (basicToPy b)
+    p_c <- takeOwnership =<< checkNull (basicToPy c)
+    liftIO [CU.exp| PyObject* {
+      PyTuple_Pack(3, $(PyObject *p_a), $(PyObject *p_b), $(PyObject *p_c)) } |]
+
+instance (FromPy a, FromPy b, FromPy c) => FromPy (a,b,c) where
+  basicFromPy p_tup = evalContT $ do
+    -- Unpack 3-tuple.
+    p_args    <- withPyAllocaArray 3
+    unpack_ok <- liftIO [CU.exp| int {
+      inline_py_unpack_iterable($(PyObject *p_tup), 3, $(PyObject **p_args))
+      }|]
+    lift $ do throwPyError
+              when (unpack_ok /= 0) $ throwPy FromPyFailed
+    -- Parse each element of tuple
+    p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
+    p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
+    p_c <- takeOwnership =<< liftIO (peekElemOff p_args 2)
+    lift $ do a <- basicFromPy p_a
+              b <- basicFromPy p_b
+              c <- basicFromPy p_c
+              pure (a,b,c)
+
+instance (ToPy a, ToPy b, ToPy c, ToPy d) => ToPy (a,b,c,d) where
+  basicToPy (a,b,c,d) = evalContT $ do
+    p_a <- takeOwnership =<< checkNull (basicToPy a)
+    p_b <- takeOwnership =<< checkNull (basicToPy b)
+    p_c <- takeOwnership =<< checkNull (basicToPy c)
+    p_d <- takeOwnership =<< checkNull (basicToPy d)
+    liftIO [CU.exp| PyObject* {
+      PyTuple_Pack(4, $(PyObject *p_a), $(PyObject *p_b), $(PyObject *p_c), $(PyObject *p_d)) } |]
+
+instance (FromPy a, FromPy b, FromPy c, FromPy d) => FromPy (a,b,c,d) where
+  basicFromPy p_tup = evalContT $ do
+    -- Unpack 3-tuple.
+    p_args    <- withPyAllocaArray 4
+    unpack_ok <- liftIO [CU.exp| int {
+      inline_py_unpack_iterable($(PyObject *p_tup), 4, $(PyObject **p_args))
+      }|]
+    lift $ do throwPyError
+              when (unpack_ok /= 0) $ throwPy FromPyFailed
+    -- Parse each element of tuple
+    p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
+    p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
+    p_c <- takeOwnership =<< liftIO (peekElemOff p_args 2)
+    p_d <- takeOwnership =<< liftIO (peekElemOff p_args 3)
+    lift $ do a <- basicFromPy p_a
+              b <- basicFromPy p_b
+              c <- basicFromPy p_c
+              d <- basicFromPy p_d
+              pure (a,b,c,d)
 
 instance (ToPy a) => ToPy [a] where
   basicToPy = basicListToPy
