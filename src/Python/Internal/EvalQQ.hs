@@ -170,7 +170,8 @@ expQQ :: Mode   -- ^ Python evaluation mode: @exec@/@eval@
       -> TH.Q TH.Exp
 expQQ mode qq_src = do
   -- We need to preprocess before passing it to python.
-  let src = prepareSource mode qq_src
+  let src     = prepareSource       mode qq_src
+      src_var = prepareForVarLookup mode src
   antis  <- liftIO $ do
     -- We've embedded script into library and we need to pass source
     -- code of QQ to a script. It can contain whatever symbols so to
@@ -185,7 +186,7 @@ expQQ mode qq_src = do
                 , "decode_and_print('" <>
                   concat [ [ intToDigit $ fromIntegral (w `shiftR` 4)
                            , intToDigit $ fromIntegral (w .&. 15) ]
-                         | w <- BS.unpack $ T.encodeUtf8 $ T.pack src
+                         | w <- BS.unpack $ T.encodeUtf8 $ T.pack src_var
                          ]
                   <> "')"
                 ]
@@ -195,10 +196,11 @@ expQQ mode qq_src = do
   let args = [ [| basicBindInDict $(TH.lift nm) $(TH.dyn (chop nm)) |]
              | nm <- antis
              ]
+      src_eval = prepareForEval mode antis src
   --
   [| \p_dict -> do
         mapM_ ($ p_dict) $(TH.listE args)
-        pure $(TH.lift src)
+        pure $(TH.lift src_eval)
    |]
 
 
@@ -218,6 +220,17 @@ prepareSource :: Mode -> String -> String
 prepareSource = \case
   Eval -> dropWhile isSpace
   Exec -> unindent
+
+prepareForVarLookup :: Mode -> String -> String
+prepareForVarLookup = \case
+  Eval -> id
+  Exec -> id
+
+prepareForEval :: Mode -> [String] -> String -> String
+prepareForEval mode _ = case mode of
+  Eval -> id
+  Exec -> id
+
 
 -- Python is indentation based and quasiquotes do not strip leading
 -- space. We have to do that ourself
