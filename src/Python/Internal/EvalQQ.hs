@@ -203,10 +203,19 @@ chop name = take (length name - length antiSuffix) name
 -- Python source code transform
 ----------------------------------------------------------------
 
+-- Python is indentation based and quasiquotes do not strip leading
+-- space. We have to do that ourself
 unindent :: String -> String
-unindent py = case ls of
-  [] -> ""
-  _  -> unlines $ drop n <$> ls
-  where
-    n  = minimum [ length (takeWhile (==' ') s) | s <- ls ]
-    ls = filter (any (not . isSpace)) $ lines py
+unindent py_src = case lines py_src of
+  []  -> ""
+  -- Strip all leading space for 1-line scripts
+  [l] -> dropWhile isSpace l
+  -- For multiline script we require that first line should be empty
+  l:ls
+    | any (not . isSpace) l -> error "First line of multiline quasiquote must be empty"
+    -- FIXME: We break multiline strings here. Badly. We need proper python lexer
+    -- FIXME: We probably should just forbid tabs
+    | otherwise ->
+      let non_empty = filter (any (not . isSpace)) ls
+          n         = minimum [ length (takeWhile (==' ') s) | s <- non_empty ]
+      in unlines $ drop n <$> ls
