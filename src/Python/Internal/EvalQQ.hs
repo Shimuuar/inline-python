@@ -6,6 +6,7 @@ module Python.Internal.EvalQQ
     pyEvalInMain
   , pyEvalExpr
   , expQQ
+  , Mode(..)
   , basicNewDict
   , basicMainDict
   , basicBindInDict
@@ -158,9 +159,13 @@ script = $( do let path = "py/bound-vars.py"
                TH.lift =<< TH.runIO (readFile path)
           )
 
+data Mode
+  = Eval
+  | Exec
+
 -- | Generate TH splice which updates python environment dictionary
 --   and returns python source code.
-expQQ :: String -- ^ Python evaluation mode: @exec@/@eval@
+expQQ :: Mode   -- ^ Python evaluation mode: @exec@/@eval@
       -> String -- ^ Python source code
       -> TH.Q TH.Exp
 expQQ mode src = do
@@ -169,7 +174,11 @@ expQQ mode src = do
     -- code of QQ to a script. It can contain whatever symbols so to
     -- be safe it's base16 encode. This encoding is very simple and we
     -- don't care much about efficiency here
-    (code, stdout, stderr) <- readProcessWithExitCode "python" ["-", mode]
+    (code, stdout, stderr) <- readProcessWithExitCode "python"
+        [ "-"
+        , case mode of Eval -> "eval"
+                       Exec -> "exec"
+        ]
       $ unlines [ script
                 , "decode_and_print('" <>
                   concat [ [ intToDigit $ fromIntegral (w `shiftR` 4)
