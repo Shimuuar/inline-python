@@ -15,6 +15,7 @@ module Python.Internal.Eval
     -- * PyObject wrapper
   , newPyObject
   , decref
+  , takeOwnership
   , ensureGIL
     -- * Exceptions
   , convertHaskell2Py
@@ -34,7 +35,6 @@ import Foreign.ForeignPtr
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Marshal.Array
-import Foreign.Marshal
 import Foreign.Storable
 import System.Environment
 import System.IO.Unsafe
@@ -362,6 +362,10 @@ ensureGIL action = do
   gil_state <- Py [CU.exp| int { PyGILState_Ensure() } |]
   action `finallyPy` Py [CU.exp| void { PyGILState_Release($(int gil_state)) } |]
 
+-- | Decrement reference counter at end of ContT block
+takeOwnership :: Ptr PyObject -> Program r (Ptr PyObject)
+takeOwnership p = ContT $ \c -> c p `finallyPy` decref p
+
 
 -- | Wrap raw python object into
 newPyObject :: Ptr PyObject -> Py PyObject
@@ -399,48 +403,50 @@ convertHaskell2Py err = Py $ do
 --   called if there's unhandled python exception. Clears exception.
 convertPy2Haskell :: Py PyError
 convertPy2Haskell = evalContT $ do
-  p_err <- withPyAlloca @(Ptr CChar)
-  -- Return 0 and set error message if there's python error
-  r     <- liftIO [CU.block| int {
-    char **p_msg = $(char **p_err);
-    PyObject *e_type, *e_value, *e_trace;
-    // Fetch python's error
-    PyErr_Fetch( &e_type, &e_value, &e_trace);
-    if( NULL == e_value ) {
-        return -1;
-    }
-    // Convert to python string object
-    PyObject *e_str = PyObject_Str(e_value);
-    if( NULL == e_str ) {
-        *p_msg = 0;
-        return 0;
-    }
-    // Convert to UTF8 C string
-    Py_ssize_t len;
-    const char *err_msg = PyUnicode_AsUTF8AndSize(e_str, &len);
-    if( 0 == e_str ) {
-        Py_DECREF(e_str);
-        *p_msg = 0;
-        return 0;
-    }
-    // Copy message
-    *p_msg = malloc(len+1);
-    strncpy(*p_msg, err_msg, len);
-    Py_DECREF(e_str);
-    return 0;
-    } |]
-  liftIO $ case r of
-    0 -> peek p_err >>= \case
-      NULL  -> pure $ PyError "CANNOT SHOW EXCEPTION"
-      c_err -> do
-        s <- peekCString c_err
-        free c_err
-        pure $ PyError s
-    _ -> error "No python exception raised"
+  p_errors <- withPyAllocaArray @(Ptr PyObject) 3
+  p_len    <- withPyAlloca      @CLong
+  -- Fetch error indicator
+  (p_type, p_value) <- liftIO $ do
+    [CU.block| void {
+       PyObject **p = $(PyObject** p_errors);
+       PyErr_Fetch(p, p+1, p+2);
+       }|]
+    p_type  <- peekElemOff p_errors 0
+    p_value <- peekElemOff p_errors 1
+    -- Traceback is not used ATM
+    pure (p_type,p_value)
+  -- Convert exception type and value to strings.
+  let pythonStr p = do
+        p_str <- liftIO [CU.block| PyObject* {
+          PyObject *s = PyObject_Str($(PyObject *p));
+          if( PyErr_Occurred() ) {
+              PyErr_Clear();
+          }
+          return s;
+          } |]
+        case p_str of
+          NULL -> abort UncovertablePyError
+          _    -> pure p_str
+  s_type  <- takeOwnership =<< pythonStr p_type
+  s_value <- takeOwnership =<< pythonStr p_value
+  -- Convert to haskell strings
+  let toString p = do
+        c_str <- [CU.block| const char* {
+          const char* s = PyUnicode_AsUTF8AndSize($(PyObject *p), $(long *p_len));
+          if( PyErr_Occurred() ) {
+              PyErr_Clear();
+          }
+          return s;
+          } |]
+        case c_str of
+          NULL -> pure ""
+          _    -> peekCString c_str
+  liftIO $ PyError <$> toString s_type <*> toString s_value
+
 
 -- | Throw python error as haskell exception if it's raised.
 throwPyError :: Py ()
-throwPyError = 
+throwPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> pure ()
     _    -> throwPy =<< convertPy2Haskell
@@ -456,4 +462,4 @@ throwPyConvesionFailed = do
     } |]
   case r of
     0 -> pure ()
-    _ -> throwPy FromPyFailed 
+    _ -> throwPy FromPyFailed

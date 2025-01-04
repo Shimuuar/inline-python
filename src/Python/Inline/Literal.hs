@@ -307,6 +307,15 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
     -- Create python function
     [C.exp| PyObject* { inline_py_callback_METH_FASTCALL($(PyCFunctionFast f_ptr)) } |]
 
+----------------------------------------------------------------
+-- Helpers
+----------------------------------------------------------------
+
+
+-- | Execute haskell callback function
+pyCallback :: Program (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
+pyCallback io = unPy $ ensureGIL $ evalContT io `catchPy` convertHaskell2Py
+
 loadArgFastcall :: FromPy a => Ptr (Ptr PyObject) -> Int -> Int64 -> Program (Ptr PyObject) a
 loadArgFastcall p_arr i tot = do
   p <- liftIO $ peekElemOff p_arr i
@@ -314,19 +323,6 @@ loadArgFastcall p_arr i tot = do
     Right a            -> pure a
     Left  FromPyFailed -> abortM $ raiseUndecodedArg (fromIntegral i + 1) (fromIntegral tot)
     Left  e            -> lift   $ throwPy e
-
-
-----------------------------------------------------------------
--- Helpers
-----------------------------------------------------------------
-
--- | Execute haskell callback function
-pyCallback :: Program (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
-pyCallback io = unPy $ ensureGIL $ evalContT io `catchPy` convertHaskell2Py
-
--- | Decrement reference counter at end of ContT block
-takeOwnership :: Ptr PyObject -> Program r (Ptr PyObject)
-takeOwnership p = ContT $ \c -> c p `finallyPy` decref p
 
 raiseUndecodedArg :: CInt -> CInt -> Py (Ptr PyObject)
 raiseUndecodedArg n tot = Py [CU.block| PyObject* {

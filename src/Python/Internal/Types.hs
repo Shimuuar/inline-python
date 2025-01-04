@@ -46,10 +46,13 @@ newtype PyObject = PyObject (ForeignPtr PyObject)
 
 -- | Python exception converted to haskell
 data PyError
-  = PyError String
-    -- ^ Python exception
+  = PyError String String
+    -- ^ Python exception. Contains exception type and message as strings.
+  | UncovertablePyError
+    -- ^ Python error could not be converted to haskell for some reason
   | FromPyFailed
-    -- ^ Conversion
+    -- ^ Conversion from python value to failed because python type is
+    --   invalid.
   deriving stock (Show)
 
 instance Exception PyError
