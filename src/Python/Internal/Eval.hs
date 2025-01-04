@@ -24,6 +24,8 @@ module Python.Internal.Eval
   , convertPy2Haskell
   , throwPyError
   , throwPyConvesionFailed
+    -- * Debugging
+  , debugPrintPy
   ) where
 
 import Control.Concurrent
@@ -364,3 +366,14 @@ throwPyConvesionFailed = do
   case r of
     0 -> pure ()
     _ -> throwPy FromPyFailed
+
+
+----------------------------------------------------------------
+-- Debugging
+----------------------------------------------------------------
+
+debugPrintPy :: Ptr PyObject -> Py ()
+debugPrintPy p = Py [CU.block| void {
+  PyObject_Print($(PyObject *p), stdout, 0);
+  printf(" [REF=%li]\n", Py_REFCNT($(PyObject *p)) );
+  } |]
