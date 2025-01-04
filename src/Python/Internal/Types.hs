@@ -9,6 +9,7 @@ module Python.Internal.Types
   ( -- * Data type
     PyObject(..)
   , unsafeWithPyObject
+  , PyThreadState
   , PyError(..)
   , Py(..)
   , catchPy
@@ -41,6 +42,9 @@ import Language.C.Inline.Context
 ----------------------------------------------------------------
 -- Primitives
 ----------------------------------------------------------------
+
+-- | Pointer tag
+data PyThreadState
 
 -- | Some python object. Since almost everything in python is mutable
 --   it could only be accessed only in IO monad.
@@ -97,8 +101,8 @@ tryPy = coerce (try @e @a)
 pyCtx :: Context
 pyCtx = mempty { ctxTypesTable = Map.fromList tytabs } where
   tytabs =
-    [ ( TypeName "PyObject"
-      , [t| PyObject |])
+    [ ( TypeName "PyObject",      [t| PyObject      |])
+    , ( TypeName "PyThreadState", [t| PyThreadState |])
     , ( TypeName "PyCFunction"
       , [t| FunPtr (Ptr PyObject -> Ptr PyObject -> IO (Ptr PyObject)) |])
     , ( TypeName "PyCFunctionFast"

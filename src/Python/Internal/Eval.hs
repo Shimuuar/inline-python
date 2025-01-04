@@ -17,6 +17,7 @@ module Python.Internal.Eval
   , decref
   , takeOwnership
   , ensureGIL
+  , dropGIL
     -- * Exceptions
   , convertHaskell2Py
   , convertPy2Haskell
@@ -241,6 +242,15 @@ ensureGIL action = do
   --       this way.
   gil_state <- Py [CU.exp| int { PyGILState_Ensure() } |]
   action `finallyPy` Py [CU.exp| void { PyGILState_Release($(int gil_state)) } |]
+
+-- | Drop GIL temporarily
+dropGIL :: IO a -> Py a
+dropGIL action = do
+  -- NOTE: We're cheating here and looking behind the veil.
+  --       PyGILState_STATE is defined as enum. Let hope it will stay
+  --       this way.
+  st <- Py [CU.exp| PyThreadState* { PyEval_SaveThread() } |]
+  Py $ action `finally` [CU.exp| void { PyEval_RestoreThread($(PyThreadState *st)) } |]
 
 -- | Decrement reference counter at end of ContT block
 takeOwnership :: Ptr PyObject -> Program r (Ptr PyObject)

@@ -10,7 +10,18 @@ import TST.Util
 
 tests :: TestTree
 tests = testGroup "Callbacks"
-  [ testCase "Function(arity=1)" $ do
+  [ testCase "Function(arity 0)" $ do
+      let double = pure 2 :: IO Int
+      [py_|
+         # OK
+         assert double_hs() == 2
+         # Wrong arg number
+         try:
+             double_hs(1,2,3)
+         except TypeError as e:
+             pass
+         |]
+  , testCase "Function(arity=1)" $ do
       let double = pure . (*2) :: Int -> IO Int
       [py_|
          # OK

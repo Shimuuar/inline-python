@@ -11,10 +11,10 @@
 // reacquire GIL there.
 // ================================================================
 
-static PyObject* callback_METH_O(PyObject* self, PyObject* arg) {
+// Same wrapper works for METH_O and METH_NOARGS
+static PyObject* callback_METH_CFunction(PyObject* self, PyObject* arg) {
     PyObject    *res;
     PyCFunction *fun = PyCapsule_GetPointer(self, NULL);
-    //--
 Py_BEGIN_ALLOW_THREADS
     res = (*fun)(self, arg);
 Py_END_ALLOW_THREADS
@@ -24,7 +24,6 @@ Py_END_ALLOW_THREADS
 static PyObject* callback_METH_FASTCALL(PyObject* self, PyObject** args, Py_ssize_t nargs) {
     PyObject        *res;
     PyCFunctionFast *fun = PyCapsule_GetPointer(self, NULL);
-    //--
 Py_BEGIN_ALLOW_THREADS
     res = (*fun)(self, args, nargs);
 Py_END_ALLOW_THREADS
@@ -39,9 +38,16 @@ static void capsule_free_FunPtr(PyObject* capsule) {
     free(fun);
 }
 
+static PyMethodDef method_METH_NOARGS = {
+    .ml_name  = "[inline_python]",
+    .ml_meth  = callback_METH_CFunction,
+    .ml_flags = METH_NOARGS,
+    .ml_doc   = "Wrapper for haskell callback"
+};
+
 static PyMethodDef method_METH_O = {
     .ml_name  = "[inline_python]",
-    .ml_meth  = callback_METH_O,
+    .ml_meth  = callback_METH_CFunction,
     .ml_flags = METH_O,
     .ml_doc   = "Wrapper for haskell callback"
 };
@@ -52,6 +58,18 @@ static PyMethodDef method_METH_FASTCALL = {
     .ml_flags = METH_FASTCALL,
     .ml_doc   = "Wrapper for haskell callback"
 };
+
+PyObject *inline_py_callback_METH_NOARGS(PyCFunction fun) {
+    PyCFunction *buf = malloc(sizeof(PyCFunction));
+    *buf = fun;
+    PyObject* self = PyCapsule_New(buf, NULL, &capsule_free_FunPtr);
+    if( PyErr_Occurred() )
+        return NULL;
+    // Python function
+    PyObject* f = PyCFunction_New(&method_METH_NOARGS, self);
+    Py_DECREF(self);
+    return f;
+}
 
 PyObject *inline_py_callback_METH_O(PyCFunction fun) {
     PyCFunction *buf = malloc(sizeof(PyCFunction));
