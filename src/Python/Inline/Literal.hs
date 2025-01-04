@@ -103,6 +103,19 @@ toPy a = runPy $ basicToPy a >>= \case
   NULL -> throwPy =<< convertPy2Haskell
   p    -> newPyObject p
 
+
+----------------------------------------------------------------
+-- Instances
+----------------------------------------------------------------
+
+instance ToPy PyObject where
+  basicToPy o = unsafeWithPyObject o $ \p ->
+    p <$ Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
+instance FromPy PyObject where
+  basicFromPy p = do
+    Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
+    newPyObject p
+
 instance ToPy CLong where
   basicToPy i = Py [CU.exp| PyObject* { PyLong_FromLong($(long i)) } |]
 instance FromPy CLong where
