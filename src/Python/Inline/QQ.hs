@@ -61,10 +61,11 @@ py_ = QuasiQuoter
 pye :: QuasiQuoter
 pye = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ evalContT $ do
-      p_env <- takeOwnership =<< lift basicNewDict
+      p_globals <- lift basicMainDict
+      p_locals  <- takeOwnership =<< lift basicNewDict
       lift $ do
-        src <- $(expQQ Eval txt) p_env
-        pyEvalExpr p_env src
+        src <- $(expQQ Eval txt) p_locals
+        pyEvalExpr p_globals p_locals src
       |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"

@@ -60,47 +60,41 @@ pyExecExpr
 pyExecExpr p_globals p_locals src = evalContT $ do
   p_py  <- withPyCString src
   r     <- liftIO [C.block| int {
+    PyObject* globals = $(PyObject* p_globals);
+    PyObject* locals  = $(PyObject* p_locals);
+    // Compile code
     PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_file_input);
     if( PyErr_Occurred() ){
         return IPY_ERR_COMPILE;
     }
-    // Execute in context of main
-    PyObject* globals = $(PyObject* p_globals);
-    PyObject* locals  = $(PyObject* p_locals);
-    PyObject* r = PyEval_EvalCode(code, globals, locals);
-    Py_XDECREF(r);
-    if( PyErr_Occurred() ) {
-        return IPY_ERR_PYTHON;
-    }
-    return IPY_OK;
+    // Execute statements
+    PyObject* res = PyEval_EvalCode(code, globals, locals);
+    Py_XDECREF(res);
+    Py_DECREF(code);
+    return PyErr_Occurred() ? IPY_ERR_PYTHON : IPY_OK;
     } |]
   lift $ finiEval r (pure ())
 
 -- | Evaluate expression with fresh local environment
 pyEvalExpr
-  :: Ptr PyObject -- ^ Dictionary with local
+  :: Ptr PyObject -- ^ Globals
+  -> Ptr PyObject -- ^ Locals
   -> String       -- ^ Python source code
   -> Py PyObject
-pyEvalExpr p_env src = evalContT $ do
+pyEvalExpr p_globals p_locals src = evalContT $ do
   p_py  <- withPyCString src
   p_res <- withPyAlloca @(Ptr PyObject)
   r     <- liftIO [C.block| int {
+    PyObject* globals = $(PyObject* p_globals);
+    PyObject* locals  = $(PyObject* p_locals);
     // Compile code
     PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_eval_input);
     if( PyErr_Occurred() ) {
         return IPY_ERR_COMPILE;
     }
-    // Execute in context of main
-    PyObject* main_module = PyImport_AddModule("__main__");
-    if( PyErr_Occurred() ) {
-        return IPY_ERR_PYTHON;
-    }
-    PyObject* globals     = PyModule_GetDict(main_module);
-    if( PyErr_Occurred() ) {
-        return IPY_ERR_PYTHON;
-    }
-    //
-    PyObject* r = PyEval_EvalCode(code, globals, $(PyObject* p_env));
+    // Evaluate expression
+    PyObject* r = PyEval_EvalCode(code, globals, locals);
+    Py_DECREF(code);
     if( PyErr_Occurred() ) {
         return IPY_ERR_PYTHON;
     }
