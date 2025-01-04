@@ -66,4 +66,25 @@ tests = testGroup "Callbacks"
       [py_|
         assert foo_hs(100,5) == 20
         |]
+    ----------------------------------------
+  , testCase "No leaks (arity=1)" $ do
+      let foo :: Int -> IO Int
+          foo y = pure $ 10 * y
+      [py_|
+        import sys
+        x = 123456
+        old_refcount = sys.getrefcount(x)
+        foo_hs(x)
+        assert old_refcount == sys.getrefcount(x)
+        |]
+  , testCase "No leaks (arity=2)" $ do
+      let foo :: Int -> Int -> IO Int
+          foo x y = pure $ x * y
+      [py_|
+        import sys
+        x = 123456
+        old_refcount = sys.getrefcount(x)
+        foo_hs(1,x)
+        assert old_refcount == sys.getrefcount(x)
+        |]
   ]
