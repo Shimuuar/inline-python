@@ -352,10 +352,19 @@ instance (FromPy a) => FromPy [a] where
 --        with async exception out of the blue
 
 
+instance (ToPy b) => ToPy (IO b) where
+  basicToPy f = Py $ do
+    --
+    f_ptr <- wrapCFunction $ \_ _ -> pyCallback $ do
+      lift $ basicToPy =<< dropGIL f
+    --
+    [CU.exp| PyObject* { inline_py_callback_METH_NOARGS($(PyCFunction f_ptr)) } |]
+
+
 instance (FromPy a, Show a, ToPy b) => ToPy (a -> IO b) where
   basicToPy f = Py $ do
     --
-    f_ptr <- wrapO $ \_ p_a -> pyCallback $ do
+    f_ptr <- wrapCFunction $ \_ p_a -> pyCallback $ do
       a <- loadArg p_a 0 1
       lift $ basicToPy =<< dropGIL (f a)
     --
@@ -423,7 +432,7 @@ raiseBadNArgs expected got = Py [CU.block| PyObject* {
 
 type FunWrapper a = a -> IO (FunPtr a)
 
-foreign import ccall "wrapper" wrapO
+foreign import ccall "wrapper" wrapCFunction
   :: FunWrapper (Ptr PyObject -> Ptr PyObject -> IO (Ptr PyObject))
 
 foreign import ccall "wrapper" wrapFastcall

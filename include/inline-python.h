@@ -23,6 +23,9 @@ typedef _PyCFunctionFast PyCFunctionFast;
 // Callbacks
 // ================================================================
 
+// Wrap haskell callback using METH_NOARGS calling convention
+PyObject *inline_py_callback_METH_NOARGS(PyCFunction fun);
+
 // Wrap haskell callback using METH_O calling convention
 PyObject *inline_py_callback_METH_O(PyCFunction fun);
 
