@@ -42,7 +42,7 @@ py_ = QuasiQuoter
                                       p_locals  <- basicNewDict
                                       src   <- $(expQQ Exec txt) p_locals
                                       res   <- pyEvalInMain p_globals p_locals src
-                                      basicDecref p_locals
+                                      decref p_locals
                                       return res
                          |]
   , quotePat  = error "quotePat"
@@ -59,7 +59,7 @@ pye = QuasiQuoter
   { quoteExp  = \txt -> [| runPy $ do p_env <- basicNewDict
                                       src   <- $(expQQ Eval txt) p_env
                                       res   <- pyEvalExpr p_env src
-                                      basicDecref p_env
+                                      decref p_env
                                       return res
                          |]
   , quotePat  = error "quotePat"

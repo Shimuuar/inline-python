@@ -10,7 +10,6 @@ module Python.Internal.EvalQQ
   , basicNewDict
   , basicMainDict
   , basicBindInDict
-  , basicDecref
     -- * Python transformations
   , unindent
   ) where
@@ -144,9 +143,6 @@ basicMainDict = Py [CU.block| PyObject* {
   PyObject* main_module = PyImport_AddModule("__main__");
   return PyModule_GetDict(main_module);
   }|]
-
-basicDecref :: Ptr PyObject -> Py ()
-basicDecref o = Py [CU.exp| void { Py_DECREF($(PyObject* o)) } |]
 
 
 ----------------------------------------------------------------
