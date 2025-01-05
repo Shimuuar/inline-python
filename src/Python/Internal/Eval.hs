@@ -33,7 +33,6 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
-import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
 import Foreign.C.Types
@@ -87,17 +86,15 @@ C.include "<inline-python.h>"
 -- ~~~~~~~~~~
 --
 -- CPython uses reference counting which works very well with
--- ForeignPtr. But there's a catch decrementing counter is only
--- possible if one holds GIL. This brings out two problems:
+-- ForeignPtr. But there's a catch: decrementing counter is only
+-- possible if one holds GIL. And one could not touch GIL if
+-- interpreter is not initialized or being finalized.
 --
---  1. Is it OK to run potentially blocking code in finalizer?
+-- We do not need to care whether thread is bound or not since this is
+-- single C call which will not getting migrated.
 --
---  2. Overhead of `runInBoundThread` is significant for GC (~1μs)
---     will this cause problem or if there're only few object on
---     haskell heap it would be fine?
---
--- In addition we must not do anything after interpreter shutdown.
--- It already released memory. Most of it at least.
+-- Still it's a question whether it's OK to call blocking code in
+-- ForeignPtr's finalizers.
 
 
 
@@ -144,7 +141,7 @@ unPy (Py io) = io
 
 checkInitialized :: IO ()
 checkInitialized =
-  [CU.exp| int { Py_IsInitialized() } |] >>= \case
+  [CU.exp| int { !Py_IsFinalizing() && Py_IsInitialized() } |] >>= \case
     0 -> error "Python is not initialized"
     _ -> pure ()
 
@@ -278,16 +275,16 @@ takeOwnership p = ContT $ \c -> c p `finallyPy` decref p
 newPyObject :: Ptr PyObject -> Py PyObject
 -- See NOTE: [GC]
 newPyObject p = Py $ do
-  fptr <- newForeignPtr_ p
-  -- FIXME: We still have race between check and interpreter
-  --        shutdown. At least it's narrow race
-  GHC.addForeignPtrFinalizer fptr $ do
-    [CU.exp| int { Py_IsInitialized() } |] >>= \case
-        0 -> pure ()
-        _ -> runPy $ decref p
-  pure $ PyObject fptr
+  PyObject <$> newForeignPtr fptrXDECREF p
 
-
+fptrXDECREF :: FunPtr (Ptr PyObject -> IO ())
+fptrXDECREF = [C.funPtr| void inline_py_fptr_XDECREF(PyObject* p) {
+  if( Py_IsFinalizing() || !Py_IsInitialized () )
+      return;
+  PyGILState_STATE st = PyGILState_Ensure();
+  Py_XDECREF(p);
+  PyGILState_Release(st);
+  } |]
 
 ----------------------------------------------------------------
 -- Conversion of exceptions

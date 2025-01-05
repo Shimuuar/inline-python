@@ -5,9 +5,16 @@
 #include <Rts.h>
 
 
-// Use new stable API from 3.13
+// Available since 3.13
 #ifndef PyCFunctionFast
 typedef _PyCFunctionFast PyCFunctionFast;
+#endif
+
+// Available since 3.13
+//
+// We define here compat dummy which always says No
+#ifndef Py_IsFinalizing
+#define Py_IsFinalizing(x) 0
 #endif
 
 
@@ -28,7 +35,7 @@ PyObject *inline_py_callback_METH_FASTCALL(PyCFunctionFast fun);
 
 
 // ================================================================
-// Callbacks
+// Marhsalling
 // ================================================================
 
 // Unpack iterable into array of PyObjects. Iterable must contain
