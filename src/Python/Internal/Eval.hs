@@ -171,7 +171,9 @@ finalizePython
   | rtsSupportsBoundThreads = runInBoundThread $ do
       [CU.exp| void { PyGILState_Ensure() } |]
       mask_ doFinalizePython
-  | otherwise = mask_ doFinalizePython
+  | otherwise = mask_ $ do
+      [CU.exp| void { PyGILState_Ensure() } |]
+      doFinalizePython
 
 -- | Bracket which ensures that action is executed with properly
 --   initialized interpreter
