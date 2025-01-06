@@ -22,9 +22,9 @@ module Python.Internal.Eval
     -- * Exceptions
   , convertHaskell2Py
   , convertPy2Haskell
-  , throwPyError
+  , checkThrowPyError
   , mustThrowPyError
-  , throwPyConvesionFailed
+  , checkThrowBadPyType
     -- * Debugging
   , debugPrintPy
   ) where
@@ -349,8 +349,8 @@ convertPy2Haskell = evalContT $ do
 
 
 -- | Throw python error as haskell exception if it's raised.
-throwPyError :: Py ()
-throwPyError =
+checkThrowPyError :: Py ()
+checkThrowPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> pure ()
     _    -> throwPy =<< convertPy2Haskell
@@ -363,8 +363,8 @@ mustThrowPyError msg =
     NULL -> error $ "mustThrowPyError: no python exception raised. " ++ msg
     _    -> throwPy =<< convertPy2Haskell
 
-throwPyConvesionFailed :: Py ()
-throwPyConvesionFailed = do
+checkThrowBadPyType :: Py ()
+checkThrowBadPyType = do
   r <- Py [CU.block| int {
     if( PyErr_Occurred() ) {
         PyErr_Clear();
@@ -374,7 +374,7 @@ throwPyConvesionFailed = do
     } |]
   case r of
     0 -> pure ()
-    _ -> throwPy FromPyFailed
+    _ -> throwPy BadPyType
 
 
 ----------------------------------------------------------------

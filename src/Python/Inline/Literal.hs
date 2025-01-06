@@ -72,7 +72,7 @@ class FromPy a where
   --   try to not modify python's data. This function should avoid
   --   throwing haskell exception. Any python exceptions should be
   --   thrown as 'PyError'. When data type couldn't be converted
-  --   'FromPyFailed' should be thrown to indicate failure.
+  --   'BadPyType' or 'OutOfRange' should be thrown to indicate failure.
   --
   --   This is low level function. It should be only used when working
   --   with python's C API. Otherwise 'fromPy' is preferred.
@@ -86,12 +86,14 @@ fromPyEither py = runPy $ unsafeWithPyObject py $ \p ->
 
 
 -- | Convert python object to haskell value. Will return @Nothing@ if
---   'FromPyFailed' is thrown. Other python exceptions are rethrown.
+--   'BadPyType' or 'OutOfRange' is thrown. Other python exceptions
+--   are rethrown.
 fromPy :: FromPy a => PyObject -> IO (Maybe a)
 fromPy py = runPy $ unsafeWithPyObject py $ \p ->
   (Just <$> basicFromPy p) `catchPy` \case
-    FromPyFailed -> pure Nothing
-    e            -> throwPy e
+    BadPyType  -> pure Nothing
+    OutOfRange -> pure Nothing
+    e          -> throwPy e
 
 -- | Convert python object to haskell value. Throws exception on
 --   failure.
@@ -122,36 +124,35 @@ instance ToPy CLong where
 instance FromPy CLong where
   basicFromPy p_py = do
     r <- Py [CU.exp| long { PyLong_AsLong($(PyObject *p_py)) } |]
-    r <$ throwPyConvesionFailed
+    r <$ checkThrowBadPyType
 
 instance ToPy CLLong where
   basicToPy i = Py [CU.exp| PyObject* { PyLong_FromLongLong($(long long i)) } |]
 instance FromPy CLLong where
   basicFromPy p_py = do
     r <- Py [CU.exp| long long { PyLong_AsLongLong($(PyObject *p_py)) } |]
-    r <$ throwPyConvesionFailed
+    r <$ checkThrowBadPyType
 
 instance ToPy CULong where
   basicToPy i = Py [CU.exp| PyObject* { PyLong_FromUnsignedLong($(unsigned long i)) } |]
 instance FromPy CULong where
   basicFromPy p_py = do
     r <- Py [CU.exp| unsigned long { PyLong_AsUnsignedLong($(PyObject *p_py)) } |]
-    r <$ throwPyConvesionFailed
+    r <$ checkThrowBadPyType
 
 instance ToPy CULLong where
   basicToPy i = Py [CU.exp| PyObject* { PyLong_FromUnsignedLongLong($(unsigned long long i)) } |]
 instance FromPy CULLong where
   basicFromPy p_py = do
     r <- Py [CU.exp| unsigned long long { PyLong_AsUnsignedLongLong($(PyObject *p_py)) } |]
-    r <$ throwPyConvesionFailed
-
+    r <$ checkThrowBadPyType
 
 instance ToPy CDouble where
   basicToPy i = Py [CU.exp| PyObject* { PyFloat_FromDouble($(double i)) } |]
 instance FromPy CDouble where
   basicFromPy p_py = do
     r <- Py [CU.exp| double { PyFloat_AsDouble($(PyObject *p_py)) } |]
-    r <$ throwPyConvesionFailed
+    r <$ checkThrowBadPyType
 
 deriving via CLLong  instance ToPy   Int64
 deriving via CLLong  instance FromPy Int64
@@ -210,7 +211,7 @@ instance FromPy Char where
       }
       return -1;
       } |]
-    if | r < 0     -> throwPy FromPyFailed
+    if | r < 0     -> throwPy BadPyType
        | otherwise -> pure $ chr $ fromIntegral r
 
 instance ToPy Bool where
@@ -221,7 +222,7 @@ instance ToPy Bool where
 instance FromPy Bool where
   basicFromPy p = do
     r <- Py [CU.exp| int { PyObject_IsTrue($(PyObject* p)) } |]
-    throwPyError
+    checkThrowPyError
     pure $! r /= 0
 
 
@@ -238,8 +239,8 @@ instance (FromPy a, FromPy b) => FromPy (a,b) where
     unpack_ok <- liftIO [CU.exp| int {
       inline_py_unpack_iterable($(PyObject *p_tup), 2, $(PyObject **p_args))
       }|]
-    lift $ do throwPyError
-              when (unpack_ok /= 0) $ throwPy FromPyFailed
+    lift $ do checkThrowPyError
+              when (unpack_ok /= 0) $ throwPy BadPyType
     -- Parse each element of tuple
     p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
     p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
@@ -262,8 +263,8 @@ instance (FromPy a, FromPy b, FromPy c) => FromPy (a,b,c) where
     unpack_ok <- liftIO [CU.exp| int {
       inline_py_unpack_iterable($(PyObject *p_tup), 3, $(PyObject **p_args))
       }|]
-    lift $ do throwPyError
-              when (unpack_ok /= 0) $ throwPy FromPyFailed
+    lift $ do checkThrowPyError
+              when (unpack_ok /= 0) $ throwPy BadPyType
     -- Parse each element of tuple
     p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
     p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
@@ -289,8 +290,8 @@ instance (FromPy a, FromPy b, FromPy c, FromPy d) => FromPy (a,b,c,d) where
     unpack_ok <- liftIO [CU.exp| int {
       inline_py_unpack_iterable($(PyObject *p_tup), 4, $(PyObject **p_args))
       }|]
-    lift $ do throwPyError
-              when (unpack_ok /= 0) $ throwPy FromPyFailed
+    lift $ do checkThrowPyError
+              when (unpack_ok /= 0) $ throwPy BadPyType
     -- Parse each element of tuple
     p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
     p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
@@ -314,11 +315,11 @@ instance (FromPy a) => FromPy [a] where
       }
       return iter;
       } |]
-    when (nullPtr == p_iter) $ throwPy FromPyFailed
+    when (nullPtr == p_iter) $ throwPy BadPyType
     --
     let loop f = do
           p <- Py [C.exp| PyObject* { PyIter_Next($(PyObject* p_iter)) } |]
-          throwPyError
+          checkThrowPyError
           case p of
             NULL -> pure f
             _    -> do a <- basicFromPy p `finallyPy` decref p
@@ -412,14 +413,17 @@ loadArg
   -> Program (Ptr PyObject) a
 loadArg p (fromIntegral -> i) (fromIntegral -> tot) = ContT $ \success -> do
   tryPy (basicFromPy p) >>= \case
-    Right a            -> success a
-    Left  FromPyFailed -> Py [CU.block| PyObject* {
-      char err[256];
-      sprintf(err, "Failed to decode function argument %i of %li", $(int i)+1, $(int64_t tot));
-      PyErr_SetString(PyExc_TypeError, err);
-      return NULL;
-      } |]
-    Left  e            -> throwPy e
+    Right a          -> success a
+    Left  BadPyType  -> oops
+    Left  OutOfRange -> oops
+    Left  e          -> throwPy e
+    where
+      oops = Py [CU.block| PyObject* {
+        char err[256];
+        sprintf(err, "Failed to decode function argument %i of %li", $(int i)+1, $(int64_t tot));
+        PyErr_SetString(PyExc_TypeError, err);
+        return NULL;
+        } |]
 
 -- | Load i-th argument from array as haskell parameter
 loadArgFastcall

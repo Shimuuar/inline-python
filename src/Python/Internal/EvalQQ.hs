@@ -72,7 +72,7 @@ pyExecExpr p_globals p_locals src = evalContT $ do
       Py_XDECREF(res);
       Py_DECREF(code);
       } |]
-    throwPyError
+    checkThrowPyError
 
 -- | Evaluate expression with fresh local environment
 pyEvalExpr
@@ -96,7 +96,7 @@ pyEvalExpr p_globals p_locals src = evalContT $ do
       Py_DECREF(code);
       return r;
       }|]
-    throwPyError
+    checkThrowPyError
     newPyObject p_res
 
 
