@@ -22,6 +22,7 @@ import Data.Word
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Storable
+import GHC.Float                 (float2Double, double2Float)
 
 import Language.C.Inline         qualified as C
 import Language.C.Inline.Unsafe  qualified as CU
@@ -159,12 +160,23 @@ deriving via CULLong instance FromPy Word64
 deriving via CDouble instance ToPy   Double
 deriving via CDouble instance FromPy Double
 
+
+-- TODO: Int may be 32 or 64 bit!
 instance ToPy Int where
   basicToPy   = basicToPy @Int64 . fromIntegral
 instance FromPy Int where
   basicFromPy = fmap fromIntegral . basicFromPy @Int64
 
--- -- TODO: Int may be 32 or 64 bit!
+instance ToPy Int8   where basicToPy = basicToPy @Int64  . fromIntegral
+instance ToPy Int16  where basicToPy = basicToPy @Int64  . fromIntegral
+instance ToPy Int32  where basicToPy = basicToPy @Int64  . fromIntegral
+instance ToPy Word8  where basicToPy = basicToPy @Word64 . fromIntegral
+instance ToPy Word16 where basicToPy = basicToPy @Word64 . fromIntegral
+instance ToPy Word32 where basicToPy = basicToPy @Word64 . fromIntegral
+instance ToPy Float  where basicToPy = basicToPy @Double . float2Double
+
+
+
 -- -- TODO: Int{8,16,32} & Word{8,16,32}
 
 -- | Encoded as 1-character string
