@@ -16,6 +16,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Cont
+import Data.Bits
 import Data.Char
 import Data.Int
 import Data.Word
@@ -158,15 +159,46 @@ deriving via CLLong  instance ToPy   Int64
 deriving via CLLong  instance FromPy Int64
 deriving via CULLong instance ToPy   Word64
 deriving via CULLong instance FromPy Word64
+
+deriving newtype instance ToPy   CInt
+deriving newtype instance FromPy CInt
+deriving newtype instance ToPy   CUInt
+deriving newtype instance FromPy CUInt
+deriving newtype instance ToPy   CShort
+deriving newtype instance FromPy CShort
+deriving newtype instance ToPy   CUShort
+deriving newtype instance FromPy CUShort
+deriving newtype instance ToPy   CChar
+deriving newtype instance FromPy CChar
+deriving newtype instance ToPy   CUChar
+deriving newtype instance FromPy CUChar
+deriving newtype instance ToPy   CSChar
+deriving newtype instance FromPy CSChar
+
 deriving via CDouble instance ToPy   Double
 deriving via CDouble instance FromPy Double
 
+instance ToPy   Float where basicToPy   = basicToPy . float2Double
+instance FromPy Float where basicFromPy = fmap double2Float . basicFromPy
 
--- TODO: Int may be 32 or 64 bit!
+
 instance ToPy Int where
-  basicToPy   = basicToPy @Int64 . fromIntegral
+  basicToPy
+    | wordSizeInBits == 64 = basicToPy @Int64 . fromIntegral
+    | otherwise            = basicToPy @Int32 . fromIntegral
 instance FromPy Int where
-  basicFromPy = fmap fromIntegral . basicFromPy @Int64
+  basicFromPy
+    | wordSizeInBits == 64 = fmap fromIntegral . basicFromPy @Int64
+    | otherwise            = fmap fromIntegral . basicFromPy @Int32
+
+instance ToPy Word where
+  basicToPy
+    | wordSizeInBits == 64 = basicToPy @Word64 . fromIntegral
+    | otherwise            = basicToPy @Word32 . fromIntegral
+instance FromPy Word where
+  basicFromPy
+    | wordSizeInBits == 64 = fmap fromIntegral . basicFromPy @Word64
+    | otherwise            = fmap fromIntegral . basicFromPy @Word32
 
 instance ToPy Int8   where basicToPy = basicToPy @Int64  . fromIntegral
 instance ToPy Int16  where basicToPy = basicToPy @Int64  . fromIntegral
@@ -174,11 +206,39 @@ instance ToPy Int32  where basicToPy = basicToPy @Int64  . fromIntegral
 instance ToPy Word8  where basicToPy = basicToPy @Word64 . fromIntegral
 instance ToPy Word16 where basicToPy = basicToPy @Word64 . fromIntegral
 instance ToPy Word32 where basicToPy = basicToPy @Word64 . fromIntegral
-instance ToPy Float  where basicToPy = basicToPy @Double . float2Double
 
+instance FromPy Int8 where
+  basicFromPy p = basicFromPy @Int64 p >>= \case
+    i | i <= fromIntegral (maxBound :: Int8)
+      , i >= fromIntegral (minBound :: Int8) -> pure $! fromIntegral i
+      | otherwise -> throwPy OutOfRange
 
+instance FromPy Int16 where
+  basicFromPy p = basicFromPy @Int64 p >>= \case
+    i | i <= fromIntegral (maxBound :: Int16)
+      , i >= fromIntegral (minBound :: Int16) -> pure $! fromIntegral i
+      | otherwise -> throwPy OutOfRange
 
--- -- TODO: Int{8,16,32} & Word{8,16,32}
+instance FromPy Int32 where
+  basicFromPy p = basicFromPy @Int64 p >>= \case
+    i | i <= fromIntegral (maxBound :: Int32) -> pure $! fromIntegral i
+      | otherwise -> throwPy OutOfRange
+
+instance FromPy Word8 where
+  basicFromPy p = basicFromPy @Word64 p >>= \case
+    i | i <= fromIntegral (maxBound :: Word8) -> pure $! fromIntegral i
+      | otherwise -> throwPy OutOfRange
+
+instance FromPy Word16 where
+  basicFromPy p = basicFromPy @Word64 p >>= \case
+    i | i <= fromIntegral (maxBound :: Word16) -> pure $! fromIntegral i
+      | otherwise -> throwPy OutOfRange
+
+instance FromPy Word32 where
+  basicFromPy p = basicFromPy @Word64 p >>= \case
+    i | i <= fromIntegral (maxBound :: Word32) -> pure $! fromIntegral i
+      | otherwise -> throwPy OutOfRange
+
 
 -- | Encoded as 1-character string
 instance ToPy Char where
@@ -453,3 +513,8 @@ foreign import ccall "wrapper" wrapCFunction
 
 foreign import ccall "wrapper" wrapFastcall
   :: FunWrapper (Ptr PyObject -> Ptr (Ptr PyObject) -> Int64 -> IO (Ptr PyObject))
+
+
+wordSizeInBits :: Int
+wordSizeInBits = finiteBitSize (0 :: Word)
+{-# INLINE wordSizeInBits #-}
