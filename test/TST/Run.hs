@@ -5,12 +5,14 @@ module TST.Run(tests) where
 import Control.Monad
 import Test.Tasty
 import Test.Tasty.HUnit
+import Python.Inline
 import Python.Inline.QQ
 import TST.Util
 
 tests :: TestTree
 tests = testGroup "Run python"
   [ testCase "Empty QQ" [py_| |]
+  , testCase "Second init is noop" initializePython
   , testCase "Python exceptions are converted" $ throwsPy [py_| 1 / 0 |]
   , testCase "Scope pymain->any" $ do
       [pymain|

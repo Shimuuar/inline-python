@@ -157,12 +157,17 @@ initializePython :: IO ()
 -- See NOTE: [Python and threading]
 initializePython
   | rtsSupportsBoundThreads = runInBoundThread $ mask_ $ do
-      doInializePython
-      -- We need to release GIL. Thread calling this will be
-      -- designated as main will probably never make any progress.
-      -- We'll never restore thread state
-      [CU.exp| void { PyEval_SaveThread() } |]
-  | otherwise = mask_ doInializePython
+      -- In multithreaded RTS we need to release GIL so other threads
+      -- may take it.
+      [CU.exp| int { Py_IsInitialized() } |] >>= \case
+          0 -> do doInializePython
+                  [CU.exp| void { PyEval_SaveThread() } |]
+          _ -> pure ()
+  | otherwise = mask_ $
+      [CU.exp| int { Py_IsInitialized() } |] >>= \case
+          0 -> do doInializePython
+                  [CU.exp| void { PyEval_SaveThread() } |]
+          _ -> pure ()
 
 -- | Destroy python interpreter.
 finalizePython :: IO ()
@@ -194,10 +199,6 @@ doInializePython = do
     p_argv   <- traverse (ContT . withWCString) argv
     ptr_argv <- ContT $ withArray (p_argv0 : p_argv)
     liftIO [C.block| int {
-      // Noop is interpreter is already initialized
-      if( Py_IsInitialized() ) {
-          return 0;
-      }
       // Now fill config
       PyStatus status;
       PyConfig cfg;
