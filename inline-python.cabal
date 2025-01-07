@@ -83,12 +83,14 @@ library test
                   , inline-python
                   , tasty            >=1.2
                   , tasty-hunit      >=0.10
+                  , tasty-quickcheck >=0.10
   hs-source-dirs:   test
   Exposed-modules:
     TST.Run
     TST.ToPy
     TST.FromPy
     TST.Callbacks
+    TST.Roundtrip
     TST.Util
 
 test-suite inline-python-tests
