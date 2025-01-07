@@ -63,14 +63,29 @@ C.include "<inline-python.h>"
 -- NOTE: [Python and threading]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 --
--- Python support threading to some extent and it interacts with
--- haskell threading in interesting and generally unpleasant way.
+-- Python (cpython to be precise) support threading to some extent and
+-- it interacts with haskell threading in interesting and generally
+-- unpleasant ways. So python's threads are:
 --
---  1. Any thread interacting with python interpreter must hold
+--  1. They're OS threads. Python is designed to be embeddable and can
+--     live with threads scheduled by outside entity.
+--
+--  2. Any OS thread interacting with python interpreter must hold
 --     global interpreter lock (GIL)
 --
---  2. GIL uses thread local state.
+--  3. GIL uses thread local state.
 --
+-- Haskell has two runtimes. Single threaded one doesn't cause any
+-- troubles and won't be discussed further. Multithreaded one
+-- implement N-M threading and schedules N green thread over M OS
+-- threads as it see fit.
+--
+-- One could think that running python code in bound threads and
+-- making sure that GIL is held would suffice. It doesn't.
+-- RTS m
+
+--
+
 -- This means python must run in bound threads. Or in case of
 -- single-threaded RTS we could just make safe FFI calls. There's only
 -- one thread anyway.
