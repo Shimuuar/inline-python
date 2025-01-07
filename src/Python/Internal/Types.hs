@@ -58,10 +58,16 @@ data PyError
   = PyError String String
     -- ^ Python exception. Contains exception type and message as strings.
   | UncovertablePyError
-    -- ^ Python error could not be converted to haskell for some reason
-  | FromPyFailed
-    -- ^ Conversion from python value to failed because python type is
-    --   invalid.
+    -- ^ Python exception that could not be converted to haskell for
+    --   some reason. Its appearance means that something went
+    --   seriously wrong.
+  | BadPyType
+    -- ^ It's not possible to convert given python value to a haskell
+    --   value
+  | OutOfRange
+    -- ^ Data type is suitable but value is outside of allowed
+    --   range. For example attempting to convert 1000 to @Word8@ will
+    --   result in this exception.
   deriving stock (Show)
 
 instance Exception PyError
