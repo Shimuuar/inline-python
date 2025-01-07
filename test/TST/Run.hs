@@ -11,10 +11,10 @@ import TST.Util
 
 tests :: TestTree
 tests = testGroup "Run python"
-  [ testCase "Empty QQ" [py_| |]
-  , testCase "Second init is noop" initializePython
-  , testCase "Python exceptions are converted" $ throwsPy [py_| 1 / 0 |]
-  , testCase "Scope pymain->any" $ do
+  [ testCase "Empty QQ" $ runPy [py_| |]
+  , testCase "Second init is noop" $ initializePython
+  , testCase "Python exceptions are converted" $ runPy $ throwsPy [py_| 1 / 0 |]
+  , testCase "Scope pymain->any" $ runPy $ do
       [pymain|
              x = 12
              x
@@ -41,7 +41,7 @@ tests = testGroup "Run python"
         except NameError:
             pass
         |]
-  , testCase "Scope py_->any" $ do
+  , testCase "Scope py_->any" $ runPy $ do
       [py_|
         x = 12
         x
@@ -62,7 +62,7 @@ tests = testGroup "Run python"
         except NameError:
             pass
         |]
-  , testCase "Import py_->any" $ do
+  , testCase "Import py_->any" $ runPy $ do
       [py_|
         import sys
         sys
@@ -83,7 +83,7 @@ tests = testGroup "Run python"
         except NameError:
             pass
         |]
-  , testCase "Scope pyf->any" $ do
+  , testCase "Scope pyf->any" $ runPy $ do
       _ <- [pyf|
         x = 12
         x

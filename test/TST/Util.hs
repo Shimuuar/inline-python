@@ -1,12 +1,13 @@
 -- |
 module TST.Util where
 
-import Control.Exception
+import Control.Monad.IO.Class
+import Control.Monad.Catch
 import Test.Tasty.HUnit
 
 import Python.Inline
 
-throwsPy :: IO () -> IO ()
-throwsPy io = (io >> assertFailure "Evaluation should raise python exception")
+throwsPy :: Py () -> Py ()
+throwsPy io = (io >> liftIO (assertFailure "Evaluation should raise python exception"))
   `catch` (\(_::PyError) -> pure ())
 

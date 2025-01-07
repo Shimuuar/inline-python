@@ -82,16 +82,16 @@ class FromPy a where
 
 -- | Convert python object to haskell value. All python exceptions
 --   which happen during execution will be converted to @PyError@.
-fromPyEither :: FromPy a => PyObject -> IO (Either PyError a)
-fromPyEither py = runPy $ unsafeWithPyObject py $ \p ->
+fromPyEither :: FromPy a => PyObject -> Py (Either PyError a)
+fromPyEither py = unsafeWithPyObject py $ \p ->
   (Right <$> basicFromPy p) `catch` (pure . Left)
 
 
 -- | Convert python object to haskell value. Will return @Nothing@ if
 --   'BadPyType' or 'OutOfRange' is thrown. Other python exceptions
 --   are rethrown.
-fromPy :: FromPy a => PyObject -> IO (Maybe a)
-fromPy py = runPy $ unsafeWithPyObject py $ \p ->
+fromPy :: FromPy a => PyObject -> Py (Maybe a)
+fromPy py = unsafeWithPyObject py $ \p ->
   (Just <$> basicFromPy p) `catch` \case
     BadPyType  -> pure Nothing
     OutOfRange -> pure Nothing
@@ -99,12 +99,12 @@ fromPy py = runPy $ unsafeWithPyObject py $ \p ->
 
 -- | Convert python object to haskell value. Throws exception on
 --   failure.
-fromPy' :: FromPy a => PyObject -> IO a
-fromPy' py = runPy $ unsafeWithPyObject py basicFromPy
+fromPy' :: FromPy a => PyObject -> Py a
+fromPy' py = unsafeWithPyObject py basicFromPy
 
 -- | Convert haskell value to a python object.
-toPy :: ToPy a => a -> IO PyObject
-toPy a = runPy $ basicToPy a >>= \case
+toPy :: ToPy a => a -> Py PyObject
+toPy a = basicToPy a >>= \case
   NULL -> throwM =<< convertPy2Haskell
   p    -> newPyObject p
 

@@ -78,7 +78,7 @@ testOutOfRange = testProperty
 
 propRoundtrip :: forall a. (FromPy a, ToPy a, Eq a) => a -> Property
 propRoundtrip a = ioProperty $ do
-  a' <- fromPy' =<< [pye| a_hs |]
+  a' <- runPy $ fromPy' =<< [pye| a_hs |]
   pure $ a == a'
 
 
@@ -87,7 +87,7 @@ propOutOfRange
   :: forall a wide. (ToPy wide, FromPy a, Eq a, Eq wide, Integral wide, Integral a)
   => wide -> Property
 propOutOfRange wide = ioProperty $ do
-  a_py <- fromPy @a =<< [pye| wide_hs |]
+  a_py <- runPy $ fromPy @a =<< [pye| wide_hs |]
   pure $ a_hs == a_py
   where
     -- Convert taking range into account

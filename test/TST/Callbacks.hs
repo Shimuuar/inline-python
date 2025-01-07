@@ -10,7 +10,7 @@ import TST.Util
 
 tests :: TestTree
 tests = testGroup "Callbacks"
-  [ testCase "Function(arity 0)" $ do
+  [ testCase "Function(arity 0)" $ runPy $ do
       let double = pure 2 :: IO Int
       [py_|
          # OK
@@ -21,7 +21,7 @@ tests = testGroup "Callbacks"
          except TypeError as e:
              pass
          |]
-  , testCase "Function(arity=1)" $ do
+  , testCase "Function(arity=1)" $ runPy $ do
       let double = pure . (*2) :: Int -> IO Int
       [py_|
          # OK
@@ -37,7 +37,7 @@ tests = testGroup "Callbacks"
          except TypeError as e:
              pass
          |]
-  , testCase "Function(arity=2)" $ do
+  , testCase "Function(arity=2)" $ runPy $ do
      let foo :: Int -> Double -> IO Int
          foo x y = pure $ x + round y
      [py_|
@@ -54,31 +54,31 @@ tests = testGroup "Callbacks"
          except TypeError as e:
              pass
          |]
-  , testCase "Haskell exception in callback(arity=1)" $ do
+  , testCase "Haskell exception in callback(arity=1)" $ runPy $ do
       let foo :: Int -> IO Int
           foo y = pure $ 10 `div` y
       throwsPy [py_| foo_hs(0) |]
-  , testCase "Haskell exception in callback(arity=2)" $ do
+  , testCase "Haskell exception in callback(arity=2)" $ runPy $ do
       let foo :: Int -> Int -> IO Int
           foo x y = pure $ x `div` y
       throwsPy [py_| foo_hs(1, 0) |]
     ----------------------------------------
-  , testCase "Call python in callback (arity=1)" $ do
+  , testCase "Call python in callback (arity=1)" $ runPy $ do
       let foo :: Int -> IO Int
-          foo x = do Just x' <- fromPy =<< [pye| 100 // x_hs |]
+          foo x = do Just x' <- runPy $ fromPy =<< [pye| 100 // x_hs |]
                      pure x'
       [py_|
         assert foo_hs(5) == 20
         |]
-  , testCase "Call python in callback (arity=2" $ do
+  , testCase "Call python in callback (arity=2" $ runPy $ do
       let foo :: Int -> Int -> IO Int
-          foo x y = do Just x' <- fromPy =<< [pye| x_hs // y_hs |]
+          foo x y = do Just x' <- runPy $ fromPy =<< [pye| x_hs // y_hs |]
                        pure x'
       [py_|
         assert foo_hs(100,5) == 20
         |]
     ----------------------------------------
-  , testCase "No leaks (arity=1)" $ do
+  , testCase "No leaks (arity=1)" $ runPy $ do
       let foo :: Int -> IO Int
           foo y = pure $ 10 * y
       [py_|
@@ -88,7 +88,7 @@ tests = testGroup "Callbacks"
         foo_hs(x)
         assert old_refcount == sys.getrefcount(x)
         |]
-  , testCase "No leaks (arity=2)" $ do
+  , testCase "No leaks (arity=2)" $ runPy $ do
       let foo :: Int -> Int -> IO Int
           foo x y = pure $ x * y
       [py_|

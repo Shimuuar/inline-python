@@ -85,6 +85,7 @@ library test
                   , tasty            >=1.2
                   , tasty-hunit      >=0.10
                   , tasty-quickcheck >=0.10
+                  , exceptions
   hs-source-dirs:   test
   Exposed-modules:
     TST.Run

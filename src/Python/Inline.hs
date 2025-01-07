@@ -5,6 +5,8 @@ module Python.Inline
   , finalizePython
   , withPython
     -- * Core data types
+  , Py
+  , runPy
   , PyObject
   , PyError(..)
     -- * Conversion between haskell and python
