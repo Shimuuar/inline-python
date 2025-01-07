@@ -221,7 +221,8 @@ instance FromPy Int16 where
 
 instance FromPy Int32 where
   basicFromPy p = basicFromPy @Int64 p >>= \case
-    i | i <= fromIntegral (maxBound :: Int32) -> pure $! fromIntegral i
+    i | i <= fromIntegral (maxBound :: Int32)
+      , i >= fromIntegral (minBound :: Int32) -> pure $! fromIntegral i
       | otherwise -> throwPy OutOfRange
 
 instance FromPy Word8 where
