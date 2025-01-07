@@ -12,11 +12,6 @@ module Python.Internal.Types
   , PyThreadState
   , PyError(..)
   , Py(..)
-  , catchPy
-  , finallyPy
-  , onExceptionPy
-  , throwPy
-  , tryPy
     -- * inline-C
   , pyCtx
     -- * Patterns
@@ -26,8 +21,8 @@ module Python.Internal.Types
   , pattern NULL
   ) where
 
-import Control.Exception
 import Control.Monad.IO.Class
+import Control.Monad.Catch
 import Data.Coerce
 import Data.Int
 import Data.Map.Strict           qualified as Map
@@ -81,23 +76,10 @@ instance Exception PyError
 --   It's needed in order to distinguish between code that needs such
 --   guarantees and plain IO.
 newtype Py a = Py (IO a)
-  deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail)
+  deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail,
+                    MonadThrow,MonadCatch,MonadMask)
 -- See NOTE: [Python and threading]
 
-catchPy :: forall e a. Exception e => Py a -> (e -> Py a) -> Py a
-catchPy = coerce (catch @e @a)
-
-finallyPy :: forall a b. Py a -> Py b -> Py a
-finallyPy = coerce (finally @a @b)
-
-onExceptionPy :: forall a b. Py a -> Py b -> Py a
-onExceptionPy = coerce (onException @a @b)
-
-throwPy :: Exception e => e -> Py a
-throwPy = Py . throwIO
-
-tryPy :: forall e a. Exception e => Py a -> Py (Either e a)
-tryPy = coerce (try @e @a)
 
 ----------------------------------------------------------------
 -- inline-C

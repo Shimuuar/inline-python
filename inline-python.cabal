@@ -56,6 +56,7 @@ Library
                    , template-haskell -any
                    , text             >=2
                    , bytestring
+                   , exceptions       >=0.10
   hs-source-dirs:    src
   include-dirs:      include
   c-sources:         cbits/python.c
