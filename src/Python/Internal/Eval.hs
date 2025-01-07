@@ -132,18 +132,20 @@ runPy py
   where
     -- We check whether interpreter is initialized. Throw exception if
     -- it wasn't. Better than segfault isn't it?
-    go = mask_ $ checkInitialized >> unPy (ensureGIL py)
+    go = mask_ $ isInitialized >>= \case
+      True  -> unPy (ensureGIL py)
+      False -> error "Python is not initialized"
 
 -- | Execute python action. This function is unsafe and should be only
 --   called in thread of interpreter.
 unPy :: Py a -> IO a
 unPy (Py io) = io
 
-checkInitialized :: IO ()
-checkInitialized =
-  [CU.exp| int { !Py_IsFinalizing() && Py_IsInitialized() } |] >>= \case
-    0 -> error "Python is not initialized"
-    _ -> pure ()
+
+isInitialized :: IO Bool
+isInitialized = do
+  i <- [CU.exp| int { !Py_IsFinalizing() && Py_IsInitialized() } |]
+  pure $! i /= 0
 
 
 
