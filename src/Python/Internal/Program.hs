@@ -16,6 +16,7 @@ module Python.Internal.Program
   ) where
 
 import Control.Monad.Trans.Cont
+import Control.Monad.Catch
 import Data.Coerce
 import Foreign.Ptr
 import Foreign.Marshal.Array
@@ -51,13 +52,13 @@ checkNull action = ContT $ \cnt -> action >>= \case
 finallyProg
   :: Py b -- ^ Finalizer
   -> Program r ()
-finallyProg fini = ContT $ \c -> c () `finallyPy` fini
+finallyProg fini = ContT $ \c -> c () `finally` fini
 
 -- | Evaluate finalizer if exception is thrown.
 onExceptionProg
   :: Py b -- ^ Finalizer
   -> Program r ()
-onExceptionProg fini = ContT $ \c -> c () `onExceptionPy` fini
+onExceptionProg fini = ContT $ \c -> c () `onException` fini
 
 
 ----------------------------------------------------------------

@@ -20,10 +20,10 @@ import Python.Internal.Eval
 --   defined in this block will remain visible. This quasiquote
 --   doesn't return any python value.
 --
---   This quote creates object of type @IO ()@
+--   This quote creates object of type @Py ()@
 pymain :: QuasiQuoter
 pymain = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ evaluatorPymain $(expQQ Exec txt) |]
+  { quoteExp  = \txt -> [| evaluatorPymain $(expQQ Exec txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -33,10 +33,10 @@ pymain = QuasiQuoter
 --   defined in this block will be discarded. This quasiquote doesn't
 --   return any python value.
 --
---   This quote creates object of type @IO ()@
+--   This quote creates object of type @Py ()@
 py_ :: QuasiQuoter
 py_ = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ evaluatorPy_ $(expQQ Exec txt) |]
+  { quoteExp  = \txt -> [| evaluatorPy_ $(expQQ Exec txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -45,10 +45,10 @@ py_ = QuasiQuoter
 -- | Evaluate single python expression. It only accepts single
 --   expressions same as python's @eval@.
 --
---   This quote creates object of type @IO PyObject@
+--   This quote creates object of type @Py PyObject@
 pye :: QuasiQuoter
 pye = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ evaluatorPye $(expQQ Eval txt) |]
+  { quoteExp  = \txt -> [| evaluatorPye $(expQQ Eval txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -60,7 +60,7 @@ pye = QuasiQuoter
 --   call return
 pyf :: QuasiQuoter
 pyf = QuasiQuoter
-  { quoteExp  = \txt -> [| runPy $ evaluatorPyf $(expQQ Fun txt) |]
+  { quoteExp  = \txt -> [| evaluatorPyf $(expQQ Fun txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"

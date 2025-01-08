@@ -13,6 +13,7 @@ module Python.Inline.Literal
   ) where
 
 import Control.Monad
+import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Cont
@@ -81,30 +82,30 @@ class FromPy a where
 
 -- | Convert python object to haskell value. All python exceptions
 --   which happen during execution will be converted to @PyError@.
-fromPyEither :: FromPy a => PyObject -> IO (Either PyError a)
-fromPyEither py = runPy $ unsafeWithPyObject py $ \p ->
-  (Right <$> basicFromPy p) `catchPy` (pure . Left)
+fromPyEither :: FromPy a => PyObject -> Py (Either PyError a)
+fromPyEither py = unsafeWithPyObject py $ \p ->
+  (Right <$> basicFromPy p) `catch` (pure . Left)
 
 
 -- | Convert python object to haskell value. Will return @Nothing@ if
 --   'BadPyType' or 'OutOfRange' is thrown. Other python exceptions
 --   are rethrown.
-fromPy :: FromPy a => PyObject -> IO (Maybe a)
-fromPy py = runPy $ unsafeWithPyObject py $ \p ->
-  (Just <$> basicFromPy p) `catchPy` \case
+fromPy :: FromPy a => PyObject -> Py (Maybe a)
+fromPy py = unsafeWithPyObject py $ \p ->
+  (Just <$> basicFromPy p) `catch` \case
     BadPyType  -> pure Nothing
     OutOfRange -> pure Nothing
-    e          -> throwPy e
+    e          -> throwM e
 
 -- | Convert python object to haskell value. Throws exception on
 --   failure.
-fromPy' :: FromPy a => PyObject -> IO a
-fromPy' py = runPy $ unsafeWithPyObject py basicFromPy
+fromPy' :: FromPy a => PyObject -> Py a
+fromPy' py = unsafeWithPyObject py basicFromPy
 
 -- | Convert haskell value to a python object.
-toPy :: ToPy a => a -> IO PyObject
-toPy a = runPy $ basicToPy a >>= \case
-  NULL -> throwPy =<< convertPy2Haskell
+toPy :: ToPy a => a -> Py PyObject
+toPy a = basicToPy a >>= \case
+  NULL -> throwM =<< convertPy2Haskell
   p    -> newPyObject p
 
 
@@ -211,34 +212,34 @@ instance FromPy Int8 where
   basicFromPy p = basicFromPy @Int64 p >>= \case
     i | i <= fromIntegral (maxBound :: Int8)
       , i >= fromIntegral (minBound :: Int8) -> pure $! fromIntegral i
-      | otherwise -> throwPy OutOfRange
+      | otherwise -> throwM OutOfRange
 
 instance FromPy Int16 where
   basicFromPy p = basicFromPy @Int64 p >>= \case
     i | i <= fromIntegral (maxBound :: Int16)
       , i >= fromIntegral (minBound :: Int16) -> pure $! fromIntegral i
-      | otherwise -> throwPy OutOfRange
+      | otherwise -> throwM OutOfRange
 
 instance FromPy Int32 where
   basicFromPy p = basicFromPy @Int64 p >>= \case
     i | i <= fromIntegral (maxBound :: Int32)
       , i >= fromIntegral (minBound :: Int32) -> pure $! fromIntegral i
-      | otherwise -> throwPy OutOfRange
+      | otherwise -> throwM OutOfRange
 
 instance FromPy Word8 where
   basicFromPy p = basicFromPy @Word64 p >>= \case
     i | i <= fromIntegral (maxBound :: Word8) -> pure $! fromIntegral i
-      | otherwise -> throwPy OutOfRange
+      | otherwise -> throwM OutOfRange
 
 instance FromPy Word16 where
   basicFromPy p = basicFromPy @Word64 p >>= \case
     i | i <= fromIntegral (maxBound :: Word16) -> pure $! fromIntegral i
-      | otherwise -> throwPy OutOfRange
+      | otherwise -> throwM OutOfRange
 
 instance FromPy Word32 where
   basicFromPy p = basicFromPy @Word64 p >>= \case
     i | i <= fromIntegral (maxBound :: Word32) -> pure $! fromIntegral i
-      | otherwise -> throwPy OutOfRange
+      | otherwise -> throwM OutOfRange
 
 
 -- | Encoded as 1-character string
@@ -272,7 +273,7 @@ instance FromPy Char where
       }
       return -1;
       } |]
-    if | r < 0     -> throwPy BadPyType
+    if | r < 0     -> throwM BadPyType
        | otherwise -> pure $ chr $ fromIntegral r
 
 instance ToPy Bool where
@@ -301,7 +302,7 @@ instance (FromPy a, FromPy b) => FromPy (a,b) where
       inline_py_unpack_iterable($(PyObject *p_tup), 2, $(PyObject **p_args))
       }|]
     lift $ do checkThrowPyError
-              when (unpack_ok /= 0) $ throwPy BadPyType
+              when (unpack_ok /= 0) $ throwM BadPyType
     -- Parse each element of tuple
     p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
     p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
@@ -325,7 +326,7 @@ instance (FromPy a, FromPy b, FromPy c) => FromPy (a,b,c) where
       inline_py_unpack_iterable($(PyObject *p_tup), 3, $(PyObject **p_args))
       }|]
     lift $ do checkThrowPyError
-              when (unpack_ok /= 0) $ throwPy BadPyType
+              when (unpack_ok /= 0) $ throwM BadPyType
     -- Parse each element of tuple
     p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
     p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
@@ -352,7 +353,7 @@ instance (FromPy a, FromPy b, FromPy c, FromPy d) => FromPy (a,b,c,d) where
       inline_py_unpack_iterable($(PyObject *p_tup), 4, $(PyObject **p_args))
       }|]
     lift $ do checkThrowPyError
-              when (unpack_ok /= 0) $ throwPy BadPyType
+              when (unpack_ok /= 0) $ throwM BadPyType
     -- Parse each element of tuple
     p_a <- takeOwnership =<< liftIO (peekElemOff p_args 0)
     p_b <- takeOwnership =<< liftIO (peekElemOff p_args 1)
@@ -376,14 +377,14 @@ instance (FromPy a) => FromPy [a] where
       }
       return iter;
       } |]
-    when (nullPtr == p_iter) $ throwPy BadPyType
+    when (nullPtr == p_iter) $ throwM BadPyType
     --
     let loop f = do
           p <- Py [C.exp| PyObject* { PyIter_Next($(PyObject* p_iter)) } |]
           checkThrowPyError
           case p of
             NULL -> pure f
-            _    -> do a <- basicFromPy p `finallyPy` decref p
+            _    -> do a <- basicFromPy p `finally` decref p
                        loop (f . (a:))
     ($ []) <$> loop id
 
@@ -463,7 +464,7 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
 
 -- | Execute haskell callback function
 pyCallback :: Program (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
-pyCallback io = unPy $ ensureGIL $ evalContT io `catchPy` convertHaskell2Py
+pyCallback io = unPy $ ensureGIL $ evalContT io `catch` convertHaskell2Py
 
 -- | Load argument from python object for haskell evaluation
 loadArg
@@ -473,11 +474,11 @@ loadArg
   -> Int64          -- ^ Total number of arguments
   -> Program (Ptr PyObject) a
 loadArg p (fromIntegral -> i) (fromIntegral -> tot) = ContT $ \success -> do
-  tryPy (basicFromPy p) >>= \case
+  try (basicFromPy p) >>= \case
     Right a          -> success a
     Left  BadPyType  -> oops
     Left  OutOfRange -> oops
-    Left  e          -> throwPy e
+    Left  e          -> throwM e
     where
       oops = Py [CU.block| PyObject* {
         char err[256];

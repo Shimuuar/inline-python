@@ -30,7 +30,7 @@ module Python.Internal.Eval
   ) where
 
 import Control.Concurrent
-import Control.Exception
+import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
 import Foreign.Ptr
@@ -132,18 +132,20 @@ runPy py
   where
     -- We check whether interpreter is initialized. Throw exception if
     -- it wasn't. Better than segfault isn't it?
-    go = mask_ $ checkInitialized >> unPy (ensureGIL py)
+    go = mask_ $ isInitialized >>= \case
+      True  -> unPy (ensureGIL py)
+      False -> error "Python is not initialized"
 
 -- | Execute python action. This function is unsafe and should be only
 --   called in thread of interpreter.
 unPy :: Py a -> IO a
 unPy (Py io) = io
 
-checkInitialized :: IO ()
-checkInitialized =
-  [CU.exp| int { !Py_IsFinalizing() && Py_IsInitialized() } |] >>= \case
-    0 -> error "Python is not initialized"
-    _ -> pure ()
+
+isInitialized :: IO Bool
+isInitialized = do
+  i <- [CU.exp| int { !Py_IsFinalizing() && Py_IsInitialized() } |]
+  pure $! i /= 0
 
 
 
@@ -258,7 +260,7 @@ ensureGIL action = do
   --       PyGILState_STATE is defined as enum. Let hope it will stay
   --       this way.
   gil_state <- Py [CU.exp| int { PyGILState_Ensure() } |]
-  action `finallyPy` Py [CU.exp| void { PyGILState_Release($(int gil_state)) } |]
+  action `finally` Py [CU.exp| void { PyGILState_Release($(int gil_state)) } |]
 
 -- | Drop GIL temporarily
 dropGIL :: IO a -> Py a
@@ -271,7 +273,7 @@ dropGIL action = do
 
 -- | Decrement reference counter at end of ContT block
 takeOwnership :: Ptr PyObject -> Program r (Ptr PyObject)
-takeOwnership p = ContT $ \c -> c p `finallyPy` decref p
+takeOwnership p = ContT $ \c -> c p `finally` decref p
 
 
 -- | Wrap raw python object into
@@ -353,7 +355,7 @@ checkThrowPyError :: Py ()
 checkThrowPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> pure ()
-    _    -> throwPy =<< convertPy2Haskell
+    _    -> throwM =<< convertPy2Haskell
 
 -- | Throw python error as haskell exception if it's raised. If it's
 --   not that internal error. Another exception will be raised
@@ -361,7 +363,7 @@ mustThrowPyError :: String -> Py a
 mustThrowPyError msg =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> error $ "mustThrowPyError: no python exception raised. " ++ msg
-    _    -> throwPy =<< convertPy2Haskell
+    _    -> throwM =<< convertPy2Haskell
 
 checkThrowBadPyType :: Py ()
 checkThrowBadPyType = do
@@ -374,7 +376,7 @@ checkThrowBadPyType = do
     } |]
   case r of
     0 -> pure ()
-    _ -> throwPy BadPyType
+    _ -> throwM BadPyType
 
 
 ----------------------------------------------------------------
