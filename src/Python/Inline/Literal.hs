@@ -294,6 +294,7 @@ instance (ToPy a, ToPy b) => ToPy (a,b) where
     p_b <- takeOwnership =<< checkNull (basicToPy b)
     liftIO [CU.exp| PyObject* { PyTuple_Pack(2, $(PyObject* p_a), $(PyObject* p_b)) } |]
 
+-- | Will accept any iterable
 instance (FromPy a, FromPy b) => FromPy (a,b) where
   basicFromPy p_tup = evalContT $ do
     -- Unpack 2-tuple.
@@ -318,6 +319,7 @@ instance (ToPy a, ToPy b, ToPy c) => ToPy (a,b,c) where
     liftIO [CU.exp| PyObject* {
       PyTuple_Pack(3, $(PyObject *p_a), $(PyObject *p_b), $(PyObject *p_c)) } |]
 
+-- | Will accept any iterable
 instance (FromPy a, FromPy b, FromPy c) => FromPy (a,b,c) where
   basicFromPy p_tup = evalContT $ do
     -- Unpack 3-tuple.
@@ -345,6 +347,7 @@ instance (ToPy a, ToPy b, ToPy c, ToPy d) => ToPy (a,b,c,d) where
     liftIO [CU.exp| PyObject* {
       PyTuple_Pack(4, $(PyObject *p_a), $(PyObject *p_b), $(PyObject *p_c), $(PyObject *p_d)) } |]
 
+-- | Will accept any iterable
 instance (FromPy a, FromPy b, FromPy c, FromPy d) => FromPy (a,b,c,d) where
   basicFromPy p_tup = evalContT $ do
     -- Unpack 3-tuple.
@@ -368,6 +371,7 @@ instance (FromPy a, FromPy b, FromPy c, FromPy d) => FromPy (a,b,c,d) where
 instance (ToPy a) => ToPy [a] where
   basicToPy = basicListToPy
 
+-- | Will accept any iterable
 instance (FromPy a) => FromPy [a] where
   basicFromPy p_list = do
     p_iter <- Py [CU.block| PyObject* {
@@ -427,6 +431,7 @@ instance (FromPy a) => FromPy [a] where
 --        with async exception out of the blue
 
 
+-- | Converted to 0-ary function
 instance (ToPy b) => ToPy (IO b) where
   basicToPy f = Py $ do
     --
@@ -436,6 +441,7 @@ instance (ToPy b) => ToPy (IO b) where
     [CU.exp| PyObject* { inline_py_callback_METH_NOARGS($(PyCFunction f_ptr)) } |]
 
 
+-- | Only accepts positional parameters
 instance (FromPy a, Show a, ToPy b) => ToPy (a -> IO b) where
   basicToPy f = Py $ do
     --
@@ -445,7 +451,7 @@ instance (FromPy a, Show a, ToPy b) => ToPy (a -> IO b) where
     --
     [CU.exp| PyObject* { inline_py_callback_METH_O($(PyCFunction f_ptr)) } |]
 
-
+-- | Only accepts positional parameters
 instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
   basicToPy f = Py $ do
     --
@@ -505,7 +511,6 @@ raiseBadNArgs expected got = Py [CU.block| PyObject* {
   PyErr_SetString(PyExc_TypeError, err);
   return NULL;
   } |]
-
 
 
 type FunWrapper a = a -> IO (FunPtr a)

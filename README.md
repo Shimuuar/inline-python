@@ -18,7 +18,8 @@ main = withPython $ do
   let input = [1..10] :: [Int]
   let square :: Int -> IO Int
       square x = pure (x * x)
-  print =<< fromPy' @[Int] =<< [pye| [ square_hs(x) for x in input_hs ] |]
+  print =<< runPy $ do
+    fromPy' @[Int] =<< [pye| [ square_hs(x) for x in input_hs ] |]
 ```
 
 it would output:
