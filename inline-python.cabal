@@ -96,10 +96,12 @@ library test
     TST.Roundtrip
     TST.Util
 
+-- Running tests using several threads does very good job at finding threading
+-- bugs. Especially deadlocks
 test-suite inline-python-tests
   import:           language
   type:             exitcode-stdio-1.0
-  Ghc-options:      -threaded
+  Ghc-options:      -threaded -with-rtsopts=-N2
   hs-source-dirs:   test/exe
   main-is:          main.hs
   build-depends:    base
