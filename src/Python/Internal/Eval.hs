@@ -36,7 +36,6 @@ module Python.Internal.Eval
 
 import Control.Concurrent
 import Control.Concurrent.STM
-import Control.Exception         (AsyncException(..),SomeAsyncException)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
@@ -277,10 +276,7 @@ initializePython = [CU.exp| int { Py_IsInitialized() } |] >>= \case
 
 -- | Destroy python interpreter.
 finalizePython :: IO ()
--- See NOTE: [Python and threading]
-finalizePython
-  | rtsSupportsBoundThreads = runInBoundThread $ mask_ doFinalizePython
-  | otherwise               = mask_ $ doFinalizePython
+finalizePython = mask_ doFinalizePython
 
 -- | Bracket which ensures that action is executed with properly
 --   initialized interpreter
@@ -313,24 +309,7 @@ doInializePython = do
                 lock_init <- newEmptyMVar
                 lock_eval <- newEmptyMVar
                 -- Main thread
-                tid_main  <- forkOS $ do
-                  r <- doInializePythonIO
-                  putMVar lock_init r
-                  case r of
-                    False -> pure ()
-                    True  -> mask_ $ do
-                      let loop = takeMVar lock_eval >>= \case
-                            EvalReq py resp -> do
-                              res <- (Right <$> runPy py) `catch` (pure . Left)
-                              putMVar resp res
-                              loop
-                            StopReq resp -> do
-                              [C.block| void {
-                                PyGILState_Ensure();
-                                Py_Finalize();
-                                } |]
-                              putMVar resp ()
-                      loop
+                tid_main <- forkOS $ mainThread lock_init lock_eval
                 takeMVar lock_init >>= \case
                   True  -> pure ()
                   False -> throwM PyInitializationFailed
@@ -345,6 +324,31 @@ doInializePython = do
                   False -> throwM PyInitializationFailed
                 fini Running1
           ) `onException` atomically (writeTVar globalPyState InitFailed)
+
+-- This action is executed on python's main thread
+mainThread :: MVar Bool -> MVar EvalReq -> IO ()
+mainThread lock_init lock_eval = do
+  r_init <- doInializePythonIO
+  putMVar lock_init r_init
+  case r_init of
+    False -> pure ()
+    True  -> mask_ $ do
+      let loop
+            = handle (\InterruptMain -> pure ())
+            $ takeMVar lock_eval >>= \case
+                EvalReq py resp -> do
+                  res <- (Right <$> runPy py) `catch` (pure . Left)
+                  putMVar resp res
+                  loop
+                StopReq resp -> do
+                  [C.block| void {
+                    PyGILState_Ensure();
+                    Py_Finalize();
+                    } |]
+                  putMVar resp ()
+      loop
+
+
 
 doInializePythonIO :: IO Bool
 doInializePythonIO = do
@@ -402,32 +406,26 @@ doFinalizePython = join $ atomically $ readTVar globalPyState >>= \case
   InInitialization -> retry
   InFinalization   -> retry
   -- We can simply call Py_Finalize
-  Running1 -> readTVar globalPyLock >>= \case
-    LockUninialized -> error "Internal error: Lock not initialized"
-    LockFinalized   -> error "Internal error: Lock is already finalized"
-    Locked{}        -> retry
-    LockedByGC      -> retry
-    LockUnlocked    -> do
-      writeTVar globalPyLock  LockFinalized
-      writeTVar globalPyState Finalized
-      pure $ [C.block| void {
-        PyGILState_Ensure();
-        Py_Finalize();
-        } |]
-  -- We need to call Py_Finalize on main thread specifically
-  RunningN _ eval tid_main tid_gc -> readTVar globalPyLock >>= \case
-    LockUninialized -> error "Internal error: Lock not initialized"
-    LockFinalized   -> error "Internal error: Lock is already finalized"
-    Locked{}        -> retry
-    LockedByGC      -> retry
-    LockUnlocked    -> do
-      writeTVar globalPyLock  LockFinalized
-      writeTVar globalPyState Finalized
-      pure $ do
-        resp <- newEmptyMVar
-        putMVar eval $ StopReq resp
-        takeMVar resp
-        killThread tid_gc
+  Running1 -> checkLock $ [C.block| void {
+    PyGILState_Ensure();
+    Py_Finalize();
+    } |]
+  -- We need to call Py_Finalize on main thread
+  RunningN _ eval _ tid_gc -> checkLock $ do
+    killThread tid_gc
+    resp <- newEmptyMVar
+    putMVar eval $ StopReq resp
+    takeMVar resp
+  where
+    checkLock action = readTVar globalPyLock >>= \case
+      LockUninialized -> error "Internal error: Lock not initialized"
+      LockFinalized   -> error "Internal error: Lock is already finalized"
+      Locked{}        -> retry
+      LockedByGC      -> retry
+      LockUnlocked    -> do
+        writeTVar globalPyLock  LockFinalized
+        writeTVar globalPyState Finalized
+        pure action
 
 
 ----------------------------------------------------------------
@@ -437,6 +435,10 @@ doFinalizePython = join $ atomically $ readTVar globalPyState >>= \case
 data EvalReq
   = forall a. EvalReq (Py a) (MVar (Either SomeException a))
   | StopReq (MVar ())
+
+data InterruptMain = InterruptMain
+  deriving stock    Show
+  deriving anyclass Exception
 
 -- | Execute python action. It will take global lock and no other
 --   python action could start execution until one currently running
@@ -464,13 +466,12 @@ runPyInMain py
       Running1         -> error "INTERNAL ERROR"
       RunningN _ eval tid_main _ -> do
         acquireLock tid_main
-        pure $
-          (( do resp <- newEmptyMVar
-                putMVar eval $ EvalReq py resp
-                either throwM pure =<< takeMVar resp
-           ) `onException` throwTo tid_main UserInterrupt
-          ) `finally` atomically (releaseLock tid_main)
-  --     resp <- newEmptyMVar
+        pure
+          $ flip finally     (atomically (releaseLock tid_main))
+          $ flip onException (throwTo tid_main InterruptMain)
+          $ do resp <- newEmptyMVar
+               putMVar eval $ EvalReq py resp
+               either throwM pure =<< takeMVar resp
   -- Single-threaded RTS
   | otherwise = runPy py
 
