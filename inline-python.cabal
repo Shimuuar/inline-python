@@ -33,6 +33,7 @@ common language
   Default-Extensions:
     NoPolyKinds
     --
+    DeriveAnyClass
     DerivingVia
     PatternSynonyms
     ViewPatterns

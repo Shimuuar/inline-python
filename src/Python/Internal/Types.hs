@@ -63,6 +63,8 @@ data PyError
     -- ^ Data type is suitable but value is outside of allowed
     --   range. For example attempting to convert 1000 to @Word8@ will
     --   result in this exception.
+  | PyInitializationFailed
+    -- ^ Initialization of python interpreter failed
   deriving stock (Show)
 
 instance Exception PyError
