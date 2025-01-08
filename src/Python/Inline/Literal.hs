@@ -464,7 +464,7 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
 
 -- | Execute haskell callback function
 pyCallback :: Program (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
-pyCallback io = grabPyLock $ unPy $ ensureGIL $ evalContT io `catch` convertHaskell2Py
+pyCallback io = callbackEnsurePyLock $ unPy $ ensureGIL $ evalContT io `catch` convertHaskell2Py
 
 -- | Load argument from python object for haskell evaluation
 loadArg
