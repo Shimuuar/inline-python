@@ -53,6 +53,7 @@ Library
                    , process
                    , transformers     >=0.4
                    , inline-c         >=0.9.1
+                   , stm              >=2.4
                    , template-haskell -any
                    , text             >=2
                    , bytestring

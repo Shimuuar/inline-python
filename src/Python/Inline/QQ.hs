@@ -13,7 +13,6 @@ module Python.Inline.QQ
 import Language.Haskell.TH.Quote
 
 import Python.Internal.EvalQQ
-import Python.Internal.Eval
 
 
 -- | Evaluate python code in context of main module. All variables
