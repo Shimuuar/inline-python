@@ -70,4 +70,4 @@ jobs:
     # ----------------
     - name: Test
       run: |
-        if [ "${{ matrix.skip-test }}" == "" ]; then cabal test all; fi
+        if [ "${{ matrix.skip-test }}" == "" ]; then timeout 3m cabal test all; fi

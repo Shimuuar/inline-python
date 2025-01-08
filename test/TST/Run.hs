@@ -3,6 +3,7 @@
 module TST.Run(tests) where
 
 import Control.Monad
+import Control.Monad.IO.Class
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
@@ -13,6 +14,7 @@ tests :: TestTree
 tests = testGroup "Run python"
   [ testCase "Empty QQ" $ runPy [py_| |]
   , testCase "Second init is noop" $ initializePython
+  , testCase "Nested runPy" $ runPy $ liftIO $ runPy $ pure ()
   , testCase "Python exceptions are converted" $ runPy $ throwsPy [py_| 1 / 0 |]
   , testCase "Scope pymain->any" $ runPy $ do
       [pymain|

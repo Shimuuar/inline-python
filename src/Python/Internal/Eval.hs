@@ -5,15 +5,19 @@
 -- |
 -- Evaluation of python expressions.
 module Python.Internal.Eval
-  ( -- * Evaluator
-    runPy
-  , unPy
+  ( -- * Locks
+    ensurePyLock
+  , callbackEnsurePyLock
     -- * Initialization
   , initializePython
   , finalizePython
   , withPython
-    -- * PyObject wrapper
+    -- * Evaluator
+  , runPy
+  , unPy
+    -- * GC-related
   , newPyObject
+    -- * C-API wrappers
   , decref
   , incref
   , takeOwnership
@@ -30,9 +34,12 @@ module Python.Internal.Eval
   ) where
 
 import Control.Concurrent
+import Control.Concurrent.STM
+import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
+import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
 import Foreign.C.Types
@@ -40,6 +47,7 @@ import Foreign.C.String
 import Foreign.Marshal.Array
 import Foreign.Storable
 import System.Environment
+import System.IO.Unsafe
 
 import Language.C.Inline          qualified as C
 import Language.C.Inline.Unsafe   qualified as CU
@@ -56,45 +64,68 @@ C.include "<inline-python.h>"
 -- NOTE: [Python and threading]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 --
--- Python support threading to some extent and it interacts with
--- haskell threading in interesting and generally unpleasant way.
+-- Python (cpython to be precise) support threading to and it
+-- interacts with haskell threading in interesting and generally
+-- unpleasant ways. In short python's threads are:
 --
---  1. Any thread interacting with python interpreter must hold
---     global interpreter lock (GIL)
+--  1. OS threads. Python is designed to be embeddable and can
+--     live with threads scheduled by outside python's runtime.
 --
---  2. GIL uses thread local state.
+--  2. Any OS thread interacting with python interpreter must hold
+--     global interpreter lock (GIL).
 --
--- This means python must run in bound threads. Or in case of
--- single-threaded RTS we could just make safe FFI calls. There's only
--- one thread anyway.
+--  3. GIL uses thread local state.
 --
--- In order to track code with such requirements `Py` monad (just
--- newtype over `IO`). All code interacting with Python must live in
--- it. In addition it should run with async exceptions masked since
--- writing code which works with bare pointers AND safe in presence of
--- async exceptions is almost impossible.
+-- Haskell has two runtimes. Single threaded one doesn't cause any
+-- troubles and won't be discussed further. Multithreaded one
+-- implement N-M threading and schedules N green thread on M OS
+-- threads as it see fit.
+--
+-- One could think that running python code in bound threads and
+-- making sure that GIL is held would suffice. It doesn't. Doing so
+-- would quickly results in deadlock. Exact reason for that is not
+-- understood.
+--
+-- Another problem is GHC may schedule two threads each running python
+-- code on same capability. They won't have any problems taking GIL
+-- and will run concurrently stepping on each other's toes.
+--
+-- Only way to solve this problem is to introduce another lock on
+-- haskell side. It's visible to haskell RTS so we won't get deadlocks
+-- and it makes sure that only one haskell thread interacts with
+-- python at a time.
 --
 --
--- And this is not end of our problems with threading. Python
--- designate thread in which it was initialized as a main thread. It
--- has special status but if don't take precautions we don't know
--- which haskell thread it is.
+--
+-- Also python designate thread in which python interpreter was
+-- initialized as a main thread. It has special status for example
+-- some libraries may run only in main thread (e.g. tkinter). But if
+-- we don't take special precautions we won't know which thread it
+-- is.
+--
+--
+--
+-- There's of course question how well python threading interacts with
+-- haskell. No one knows, probably it won't work well.
 
 
 
 -- NOTE: [GC]
 -- ~~~~~~~~~~
 --
--- CPython uses reference counting which works very well with
+-- CPython uses reference counting which should work very well with
 -- ForeignPtr. But there's a catch: decrementing counter is only
--- possible if one holds GIL. And one could not touch GIL if
--- interpreter is not initialized or being finalized.
+-- possible if one holds GIL. Taking GIL may block and doing so during
+-- GC may eventually will block GC thread and the whole program.
 --
--- We do not need to care whether thread is bound or not since this is
--- single C call which will not getting migrated.
+-- Current solution is not quite satisfactory: finalizer writes
+-- pointer to `Chan` which delivers it to thread which decrements
+-- counter. It's not very good solution since we need to take locks
+-- for each DECREF which is relatively costly (O(1μs)). But better
+-- solutions are not obvious.
 --
--- Still it's a question whether it's OK to call blocking code in
--- ForeignPtr's finalizers.
+-- Problem above is only relevant for multithreaded RTS there's no
+-- other threads that could hold lock and taking GIL can't fail.
 
 
 
@@ -119,68 +150,126 @@ C.include "<inline-python.h>"
 
 
 ----------------------------------------------------------------
--- Execution of Py monad
+-- Lock and global state
 ----------------------------------------------------------------
 
--- | Execute python action. It will be executed with GIL held and
---   async exceptions masked.
-runPy :: Py a -> IO a
--- See NOTE: [Python and threading]
-runPy py
-  | rtsSupportsBoundThreads = runInBoundThread go -- Multithreaded RTS
-  | otherwise               = go                  -- Single-threaded RTS
-  where
-    -- We check whether interpreter is initialized. Throw exception if
-    -- it wasn't. Better than segfault isn't it?
-    go = mask_ $ isInitialized >>= \case
-      True  -> unPy (ensureGIL py)
-      False -> error "Python is not initialized"
+globalPyState :: TVar PyState
+globalPyState = unsafePerformIO $ newTVarIO NotInitialized
+{-# NOINLINE globalPyState #-}
 
--- | Execute python action. This function is unsafe and should be only
---   called in thread of interpreter.
-unPy :: Py a -> IO a
-unPy (Py io) = io
+globalPyLock :: TVar PyLock
+globalPyLock = unsafePerformIO $ newTVarIO LockUninialized
+{-# NOINLINE globalPyLock #-}
 
 
-isInitialized :: IO Bool
-isInitialized = do
-  i <- [CU.exp| int { !Py_IsFinalizing() && Py_IsInitialized() } |]
-  pure $! i /= 0
+-- | State of python interpreter
+data PyState
+  = NotInitialized
+    -- ^ Initialization is not done. Initial state.
+  | InInitialization
+    -- ^ Interpreter is being initialized.
+  | InitFailed
+    -- ^ Initialization was attempted but failed for whatever reason.
+  | Running !(Chan (Ptr PyObject)) !(Maybe ThreadId)
+    -- ^ Interpreter is running
+  | InFinalization
+    -- ^ Interpreter is being finalized.
+  | Finalized
+    -- ^ Interpreter was shut down.
+
+
+-- | Lock. It's necessary for lock to reentrant since thread may take
+--   it several times for example by nesting 'runPy'. We use
+--   'ThreadId' as a key to figure out whether thread may retake lock
+--   or not.
+--
+--   Another special case is callbacks. Callback (via 'FunPtr') will
+--   start new haskell thread so we need to add primitive for grabbing
+--   lock regardless of current 'ThreadId'
+data PyLock
+  = LockUninialized
+    -- ^ There's no interpreter and lock does not exist.
+  | LockUnlocked
+    -- ^ Lock could be taked
+  | Locked !ThreadId [ThreadId]
+  | LockedByGC
+  | LockFinalized
+  deriving Show
+
+-- | Execute code ensuring that python lock is held by current thread.
+ensurePyLock :: IO a -> IO a
+ensurePyLock action = do
+  tid <- myThreadId
+  bracket_ (atomically $ acquireLock tid)
+           (atomically $ releaseLock tid)
+           action
+
+-- | Retake lock regardless of thread which hold lock. Lock must be
+--   already taken. Caller must make sure that thread holding lock is
+--   block for duration of action.
+--
+--   This is very unsafe. It must be used only in callbacks from
+--   python to haskell
+callbackEnsurePyLock :: IO a -> IO a
+callbackEnsurePyLock action = do
+  tid <- myThreadId
+  bracket_ (atomically $ grabLock tid)
+           (atomically $ releaseLock tid)
+           action
+
+
+acquireLock :: ThreadId -> STM ()
+acquireLock tid = readTVar globalPyLock >>= \case
+  LockUninialized -> error "Python is not started"
+  LockFinalized   -> error "Python is already stopped"
+  LockedByGC      -> retry
+  LockUnlocked    -> writeTVar globalPyLock $ Locked tid []
+  Locked t xs
+    | t == tid  -> writeTVar globalPyLock $ Locked t (t : xs)
+    | otherwise -> retry
+
+grabLock :: ThreadId -> STM ()
+grabLock tid = readTVar globalPyLock >>= \case
+  LockUninialized -> error "Python is not started"
+  LockFinalized   -> error "Python is already stopped"
+  LockedByGC      -> retry
+  LockUnlocked    -> writeTVar globalPyLock $ Locked tid []
+  Locked t xs     -> writeTVar globalPyLock $ Locked tid (t : xs)
+
+releaseLock :: ThreadId -> STM ()
+releaseLock tid = readTVar globalPyLock >>= \case
+  LockUninialized -> error "Python is not started"
+  LockFinalized   -> error "Python is already stopped"
+  LockUnlocked    -> error "INTERNAL ERROR releasing unlocked"
+  LockedByGC      -> error "INTERNAL ERROR lock held by GC"
+  Locked t xs
+    | t /= tid  -> error "INTERNAL ERROR releasing wrong lock"
+    | otherwise -> writeTVar globalPyLock $! case xs of
+        []    -> LockUnlocked
+        t':ts -> Locked t' ts
 
 
 
 ----------------------------------------------------------------
--- Initialization of interpreter
+-- Initialization and finalization
 ----------------------------------------------------------------
 
 -- | Initialize python interpreter. If interpreter is already
---   initialized it's a noop.
+--   initialized it's a noop. Calling after python was shut down will
+--   result in error.
 initializePython :: IO ()
 -- See NOTE: [Python and threading]
-initializePython
-  | rtsSupportsBoundThreads = runInBoundThread $ mask_ $ do
-      -- In multithreaded RTS we need to release GIL so other threads
-      -- may take it.
-      [CU.exp| int { Py_IsInitialized() } |] >>= \case
-          0 -> do doInializePython
-                  [CU.exp| void { PyEval_SaveThread() } |]
-          _ -> pure ()
-  | otherwise = mask_ $
-      [CU.exp| int { Py_IsInitialized() } |] >>= \case
-          0 -> do doInializePython
-                  [CU.exp| void { PyEval_SaveThread() } |]
-          _ -> pure ()
+initializePython = [CU.exp| int { Py_IsInitialized() } |] >>= \case
+  0 | rtsSupportsBoundThreads -> runInBoundThread $ mask_ $ doInializePython
+    | otherwise               -> mask_ $ doInializePython
+  _ -> pure ()
 
 -- | Destroy python interpreter.
 finalizePython :: IO ()
 -- See NOTE: [Python and threading]
 finalizePython
-  | rtsSupportsBoundThreads = runInBoundThread $ do
-      [CU.exp| void { PyGILState_Ensure() } |]
-      mask_ doFinalizePython
-  | otherwise = mask_ $ do
-      [CU.exp| void { PyGILState_Ensure() } |]
-      doFinalizePython
+  | rtsSupportsBoundThreads = runInBoundThread $ mask_ doFinalizePython
+  | otherwise               = mask_ $ doFinalizePython
 
 -- | Bracket which ensures that action is executed with properly
 --   initialized interpreter
@@ -190,7 +279,30 @@ withPython = bracket_ initializePython finalizePython
 
 doInializePython :: IO ()
 doInializePython = do
-  -- NOTE: I'd like more direct access to argv
+  -- First we need to grab global python lock on haskell side
+  join $ atomically $ do
+    readTVar globalPyState >>= \case
+      Finalized        -> error "Python was already finalized"
+      InitFailed       -> error "Python was unable to initialize"
+      InInitialization -> retry
+      InFinalization   -> retry
+      Running{}        -> pure $ pure ()
+      NotInitialized   -> do
+        writeTVar globalPyState InInitialization
+        pure $
+          (do doInializePythonIO
+              gc_chan <- newChan
+              gc_tid  <- if
+                | rtsSupportsBoundThreads -> Just <$> forkOS (gcThread gc_chan)
+                | otherwise               -> pure Nothing
+              atomically $ do
+                writeTVar globalPyState $ Running gc_chan gc_tid
+                writeTVar globalPyLock  $ LockUnlocked
+          ) `onException` atomically (writeTVar globalPyState InitFailed)
+
+doInializePythonIO :: IO ()
+doInializePythonIO = do
+  -- FIXME: I'd like more direct access to argv
   argv0 <- getProgName
   argv  <- getArgs
   let n_argv = fromIntegral $ length argv + 1
@@ -226,6 +338,8 @@ doInializePython = do
           goto error;
       };
       PyConfig_Clear(&cfg);
+      // Release GIL so other threads may take it
+      PyEval_SaveThread();
       return 0;
       // Error case
       error:
@@ -236,15 +350,105 @@ doInializePython = do
             _ -> error "Failed to initialize interpreter"
 
 doFinalizePython :: IO ()
-doFinalizePython = [C.block| void {
-  if( Py_IsInitialized() ) {
-      Py_Finalize();
-  }
+doFinalizePython = join $ atomically $ readTVar globalPyState >>= \case
+  NotInitialized   -> error "Python is not initialized"
+  InitFailed       -> error "Python failed to initialize"
+  Finalized        -> pure $ pure ()
+  InInitialization -> retry
+  InFinalization   -> retry
+  Running _ gc_tid -> do
+    readTVar globalPyLock >>= \case
+      LockUninialized -> error "Internal error: Lock not initialized"
+      LockFinalized   -> error "Internal error: Lock is already finalized"
+      Locked{}        -> retry
+      LockedByGC      -> retry
+      LockUnlocked    -> do
+        writeTVar globalPyLock  LockFinalized
+        writeTVar globalPyState Finalized
+        pure $ do
+          mapM_ killThread gc_tid
+          [C.block| void {
+            PyGILState_Ensure();
+            Py_Finalize();
+            } |]
+
+
+----------------------------------------------------------------
+-- Running Py monad
+----------------------------------------------------------------
+
+-- | Execute python action. It will take global lock and no other
+--   python action could start execution until one currently running
+--   finished execution normally or with exception.
+runPy :: Py a -> IO a
+-- See NOTE: [Python and threading]
+runPy py
+  | rtsSupportsBoundThreads = runInBoundThread go -- Multithreaded RTS
+  | otherwise               = go                  -- Single-threaded RTS
+  where
+    -- We check whether interpreter is initialized. Throw exception if
+    -- it wasn't. Better than segfault isn't it?
+    go = ensurePyLock $ unPy (ensureGIL py)
+
+-- | Execute python action. This function is unsafe and should be only
+--   called in thread of interpreter.
+unPy :: Py a -> IO a
+unPy (Py io) = io
+
+
+
+----------------------------------------------------------------
+-- GC-related functions
+----------------------------------------------------------------
+
+-- | Wrap raw python object into
+newPyObject :: Ptr PyObject -> Py PyObject
+-- See NOTE: [GC]
+newPyObject p = Py $ do
+  fptr <- newForeignPtr_ p
+  GHC.addForeignPtrFinalizer fptr $
+    readTVarIO globalPyState >>= \case
+      Running ch _
+        | rtsSupportsBoundThreads -> writeChan ch p
+        | otherwise               -> singleThreadedDecrefCG p
+      _            -> pure ()
+  pure $ PyObject fptr
+
+-- | Thread doing garbage collection for python object in
+--   multithreaded runtime.
+gcThread :: Chan (Ptr PyObject) -> IO ()
+gcThread ch = forever $ do
+  decrefGC =<< readChan ch
+
+decrefGC :: Ptr PyObject -> IO ()
+decrefGC p = join $ atomically $ readTVar globalPyLock >>= \case
+  LockUninialized -> pure $ pure ()
+  LockFinalized   -> pure $ pure ()
+  LockedByGC      -> pure $ pure ()
+  Locked{}        -> retry
+  LockUnlocked    -> do
+    writeTVar globalPyLock LockedByGC
+    pure $ do
+      gcDecref p `finally` atomically (writeTVar globalPyLock LockUnlocked)
+
+singleThreadedDecrefCG :: Ptr PyObject -> IO ()
+singleThreadedDecrefCG p = readTVarIO globalPyLock >>= \case
+  LockUninialized -> pure ()
+  LockFinalized   -> pure ()
+  LockedByGC      -> gcDecref p
+  Locked{}        -> gcDecref p
+  LockUnlocked    -> gcDecref p
+
+gcDecref :: Ptr PyObject -> IO ()
+gcDecref p = [CU.block| void {
+  PyGILState_STATE st = PyGILState_Ensure();
+  Py_XDECREF( $(PyObject* p) );
+  PyGILState_Release(st);
   } |]
 
 
 ----------------------------------------------------------------
--- Creation of PyObject
+-- C-API wrappers
 ----------------------------------------------------------------
 
 decref :: Ptr PyObject -> Py ()
@@ -275,21 +479,6 @@ dropGIL action = do
 takeOwnership :: Ptr PyObject -> Program r (Ptr PyObject)
 takeOwnership p = ContT $ \c -> c p `finally` decref p
 
-
--- | Wrap raw python object into
-newPyObject :: Ptr PyObject -> Py PyObject
--- See NOTE: [GC]
-newPyObject p = Py $ do
-  PyObject <$> newForeignPtr fptrXDECREF p
-
-fptrXDECREF :: FunPtr (Ptr PyObject -> IO ())
-fptrXDECREF = [C.funPtr| void inline_py_fptr_XDECREF(PyObject* p) {
-  if( Py_IsFinalizing() || !Py_IsInitialized () )
-      return;
-  PyGILState_STATE st = PyGILState_Ensure();
-  Py_XDECREF(p);
-  PyGILState_Release(st);
-  } |]
 
 ----------------------------------------------------------------
 -- Conversion of exceptions
