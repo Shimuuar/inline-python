@@ -43,6 +43,7 @@ module Python.Inline
     -- * Core data types
   , Py
   , runPy
+  , runPyInMain
   , PyObject
     -- * Conversion between haskell and python
     -- $conversion

@@ -14,6 +14,7 @@ module Python.Internal.Eval
   , withPython
     -- * Evaluator
   , runPy
+  , runPyInMain
   , unPy
     -- * GC-related
   , newPyObject
@@ -35,6 +36,7 @@ module Python.Internal.Eval
 
 import Control.Concurrent
 import Control.Concurrent.STM
+import Control.Exception         (AsyncException(..),SomeAsyncException)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
@@ -170,8 +172,13 @@ data PyState
     -- ^ Interpreter is being initialized.
   | InitFailed
     -- ^ Initialization was attempted but failed for whatever reason.
-  | Running !(Chan (Ptr PyObject)) !(Maybe ThreadId)
-    -- ^ Interpreter is running
+  | Running1
+    -- ^ Interpreter is running. We're using single threaded RTS
+  | RunningN !(Chan (Ptr PyObject))
+             !(MVar EvalReq)
+             !ThreadId
+             !ThreadId
+    -- ^ Interpreter is running. We're using multithreaded RTS
   | InFinalization
     -- ^ Interpreter is being finalized.
   | Finalized
@@ -192,8 +199,12 @@ data PyLock
   | LockUnlocked
     -- ^ Lock could be taked
   | Locked !ThreadId [ThreadId]
+    -- ^ Python is locked by given thread. Lock could be taken multiple
+    --   times
   | LockedByGC
+    -- ^ Python is locked by GC thread.
   | LockFinalized
+    -- ^ Python interpreter shut down. Taking lock is not possible
   deriving Show
 
 -- | Execute code ensuring that python lock is held by current thread.
@@ -286,21 +297,56 @@ doInializePython = do
       InitFailed       -> error "Python was unable to initialize"
       InInitialization -> retry
       InFinalization   -> retry
-      Running{}        -> pure $ pure ()
+      Running1{}       -> pure $ pure ()
+      RunningN{}       -> pure $ pure ()
       NotInitialized   -> do
         writeTVar globalPyState InInitialization
+        let fini st = atomically $ do
+              writeTVar globalPyState $ st
+              writeTVar globalPyLock  $ LockUnlocked
+
         pure $
-          (do doInializePythonIO
-              gc_chan <- newChan
-              gc_tid  <- if
-                | rtsSupportsBoundThreads -> Just <$> forkOS (gcThread gc_chan)
-                | otherwise               -> pure Nothing
-              atomically $ do
-                writeTVar globalPyState $ Running gc_chan gc_tid
-                writeTVar globalPyLock  $ LockUnlocked
+          (mask_ $ if
+            -- On multithreaded runtime create bound thread to make
+            -- sure we can call python in its main thread.
+            | rtsSupportsBoundThreads -> do
+                lock_init <- newEmptyMVar
+                lock_eval <- newEmptyMVar
+                -- Main thread
+                tid_main  <- forkOS $ do
+                  r <- doInializePythonIO
+                  putMVar lock_init r
+                  case r of
+                    False -> pure ()
+                    True  -> mask_ $ do
+                      let loop = takeMVar lock_eval >>= \case
+                            EvalReq py resp -> do
+                              res <- (Right <$> runPy py) `catch` (pure . Left)
+                              putMVar resp res
+                              loop
+                            StopReq resp -> do
+                              [C.block| void {
+                                PyGILState_Ensure();
+                                Py_Finalize();
+                                } |]
+                              putMVar resp ()
+                      loop
+                takeMVar lock_init >>= \case
+                  True  -> pure ()
+                  False -> throwM PyInitializationFailed
+                -- GC thread
+                gc_chan <- newChan
+                tid_gc  <- forkOS $ gcThread gc_chan
+                fini $ RunningN gc_chan lock_eval tid_main tid_gc
+            -- Nothing special is needed on single threaded RTS
+            | otherwise -> do
+                doInializePythonIO >>= \case
+                  True  -> pure ()
+                  False -> throwM PyInitializationFailed
+                fini Running1
           ) `onException` atomically (writeTVar globalPyState InitFailed)
 
-doInializePythonIO :: IO ()
+doInializePythonIO :: IO Bool
 doInializePythonIO = do
   -- FIXME: I'd like more direct access to argv
   argv0 <- getProgName
@@ -346,8 +392,7 @@ doInializePythonIO = do
       PyConfig_Clear(&cfg);
       return 1;
       } |]
-  case r of 0 -> pure ()
-            _ -> error "Failed to initialize interpreter"
+  return $! r == 0
 
 doFinalizePython :: IO ()
 doFinalizePython = join $ atomically $ readTVar globalPyState >>= \case
@@ -356,26 +401,42 @@ doFinalizePython = join $ atomically $ readTVar globalPyState >>= \case
   Finalized        -> pure $ pure ()
   InInitialization -> retry
   InFinalization   -> retry
-  Running _ gc_tid -> do
-    readTVar globalPyLock >>= \case
-      LockUninialized -> error "Internal error: Lock not initialized"
-      LockFinalized   -> error "Internal error: Lock is already finalized"
-      Locked{}        -> retry
-      LockedByGC      -> retry
-      LockUnlocked    -> do
-        writeTVar globalPyLock  LockFinalized
-        writeTVar globalPyState Finalized
-        pure $ do
-          mapM_ killThread gc_tid
-          [C.block| void {
-            PyGILState_Ensure();
-            Py_Finalize();
-            } |]
+  -- We can simply call Py_Finalize
+  Running1 -> readTVar globalPyLock >>= \case
+    LockUninialized -> error "Internal error: Lock not initialized"
+    LockFinalized   -> error "Internal error: Lock is already finalized"
+    Locked{}        -> retry
+    LockedByGC      -> retry
+    LockUnlocked    -> do
+      writeTVar globalPyLock  LockFinalized
+      writeTVar globalPyState Finalized
+      pure $ [C.block| void {
+        PyGILState_Ensure();
+        Py_Finalize();
+        } |]
+  -- We need to call Py_Finalize on main thread specifically
+  RunningN _ eval tid_main tid_gc -> readTVar globalPyLock >>= \case
+    LockUninialized -> error "Internal error: Lock not initialized"
+    LockFinalized   -> error "Internal error: Lock is already finalized"
+    Locked{}        -> retry
+    LockedByGC      -> retry
+    LockUnlocked    -> do
+      writeTVar globalPyLock  LockFinalized
+      writeTVar globalPyState Finalized
+      pure $ do
+        resp <- newEmptyMVar
+        putMVar eval $ StopReq resp
+        takeMVar resp
+        killThread tid_gc
 
 
 ----------------------------------------------------------------
 -- Running Py monad
 ----------------------------------------------------------------
+
+data EvalReq
+  = forall a. EvalReq (Py a) (MVar (Either SomeException a))
+  | StopReq (MVar ())
 
 -- | Execute python action. It will take global lock and no other
 --   python action could start execution until one currently running
@@ -389,6 +450,29 @@ runPy py
     -- We check whether interpreter is initialized. Throw exception if
     -- it wasn't. Better than segfault isn't it?
     go = ensurePyLock $ unPy (ensureGIL py)
+
+runPyInMain :: Py a -> IO a
+-- See NOTE: [Python and threading]
+runPyInMain py
+  -- Multithreaded RTS
+  | rtsSupportsBoundThreads = join $ atomically $ readTVar globalPyState >>= \case
+      NotInitialized   -> error "Python is not initialized"
+      InitFailed       -> error "Python failed to initialize"
+      Finalized        -> error "Python is already finalized"
+      InInitialization -> retry
+      InFinalization   -> retry
+      Running1         -> error "INTERNAL ERROR"
+      RunningN _ eval tid_main _ -> do
+        acquireLock tid_main
+        pure $
+          (( do resp <- newEmptyMVar
+                putMVar eval $ EvalReq py resp
+                either throwM pure =<< takeMVar resp
+           ) `onException` throwTo tid_main UserInterrupt
+          ) `finally` atomically (releaseLock tid_main)
+  --     resp <- newEmptyMVar
+  -- Single-threaded RTS
+  | otherwise = runPy py
 
 -- | Execute python action. This function is unsafe and should be only
 --   called in thread of interpreter.
@@ -408,10 +492,9 @@ newPyObject p = Py $ do
   fptr <- newForeignPtr_ p
   GHC.addForeignPtrFinalizer fptr $
     readTVarIO globalPyState >>= \case
-      Running ch _
-        | rtsSupportsBoundThreads -> writeChan ch p
-        | otherwise               -> singleThreadedDecrefCG p
-      _            -> pure ()
+      RunningN ch _ _ _  -> writeChan ch p
+      Running1           -> singleThreadedDecrefCG p
+      _                  -> pure ()
   pure $ PyObject fptr
 
 -- | Thread doing garbage collection for python object in

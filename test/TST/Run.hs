@@ -15,6 +15,10 @@ tests = testGroup "Run python"
   [ testCase "Empty QQ" $ runPy [py_| |]
   , testCase "Second init is noop" $ initializePython
   , testCase "Nested runPy" $ runPy $ liftIO $ runPy $ pure ()
+  , testCase "runPyInMain" $ runPyInMain $ [py_|
+      import threading
+      assert threading.main_thread() == threading.current_thread()
+      |]
   , testCase "Python exceptions are converted" $ runPy $ throwsPy [py_| 1 / 0 |]
   , testCase "Scope pymain->any" $ runPy $ do
       [pymain|
