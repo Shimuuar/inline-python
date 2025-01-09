@@ -130,25 +130,21 @@ evaluatorPyf getSource = evalContT $ do
       NULL -> error "INTERNAL ERROR: _inline_python_ must be present"
       p    -> pure p
     -- Call python function we just constructed
-    basicCallKwdOnly  p_fun p_kwargs >>= \case
-      NULL  -> mustThrowPyError "evaluatorPyf"
-      p_res -> newPyObject p_res
+    newPyObject =<< throwOnNULL =<< basicCallKwdOnly p_fun p_kwargs
 
 
 basicBindInDict :: ToPy a => String -> a -> Ptr PyObject -> Py ()
 basicBindInDict name a p_dict = evalContT $ do
   p_key <- withPyCString name
-  p_obj <- takeOwnership =<< lift (basicToPy a)
-  lift $ case p_obj of
-    NULL -> mustThrowPyError "basicBindInDict"
-    _    -> do
-      r <- Py [C.block| int {
-        PyObject* p_obj = $(PyObject* p_obj);
-        return PyDict_SetItemString($(PyObject* p_dict), $(char* p_key), p_obj);
-        } |]
-      case r of
-        0 -> pure ()
-        _ -> mustThrowPyError "basicBindInDict"
+  p_obj <- takeOwnership =<< lift (throwOnNULL =<< basicToPy a)
+  lift $ do
+    r <- Py [C.block| int {
+      PyObject* p_obj = $(PyObject* p_obj);
+      return PyDict_SetItemString($(PyObject* p_dict), $(char* p_key), p_obj);
+      } |]
+    case r of
+      0 -> pure ()
+      _ -> mustThrowPyError
 
 -- | Return dict of @__main__@ module
 basicMainDict :: Py (Ptr PyObject)

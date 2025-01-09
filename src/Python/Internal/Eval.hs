@@ -28,6 +28,7 @@ module Python.Internal.Eval
   , checkThrowPyError
   , mustThrowPyError
   , checkThrowBadPyType
+  , throwOnNULL
     -- * Debugging
   , debugPrintPy
   ) where
@@ -621,11 +622,17 @@ checkThrowPyError =
 
 -- | Throw python error as haskell exception if it's raised. If it's
 --   not that internal error. Another exception will be raised
-mustThrowPyError :: String -> Py a
-mustThrowPyError msg =
+mustThrowPyError :: Py a
+mustThrowPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
-    NULL -> error $ "mustThrowPyError: no python exception raised. " ++ msg
+    NULL -> error $ "mustThrowPyError: no python exception raised."
     _    -> throwM =<< convertPy2Haskell
+
+-- | Calls mustThrowPyError if pointer is null or returns it unchanged
+throwOnNULL :: Ptr PyObject -> Py (Ptr PyObject)
+throwOnNULL = \case
+  NULL -> mustThrowPyError
+  p    -> pure p
 
 checkThrowBadPyType :: Py ()
 checkThrowBadPyType = do
