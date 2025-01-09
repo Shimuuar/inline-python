@@ -12,6 +12,7 @@ module Python.Internal.Types
   , PyThreadState
   , PyError(..)
   , Py(..)
+  , pyIO
     -- * inline-C
   , pyCtx
     -- * Patterns
@@ -23,6 +24,7 @@ module Python.Internal.Types
 
 import Control.Monad.IO.Class
 import Control.Monad.Catch
+import Control.Exception
 import Data.Coerce
 import Data.Int
 import Data.Map.Strict           qualified as Map
@@ -70,17 +72,24 @@ data PyError
 instance Exception PyError
 
 
--- | Monad for code which is interacts directly with python
---   interpreter. During its execution python global interpreter lock
---   (GIL) is held, async exceptions are masked. It's also always
---   executed on bound thread if RTS supports one.
---
---   It's needed in order to distinguish between code that needs such
---   guarantees and plain IO.
+-- | Monad for code which is interacts with python interpreter. Only
+--   one haskell thread can interact with python interpreter at a
+--   time. Function that execute @Py@ make sure that this invariant is
+--   held. Also note that all code in @Py@ monad is executed with
+--   asynchronous exception masked, but 'liftIO' removes mask.
 newtype Py a = Py (IO a)
-  deriving newtype (Functor,Applicative,Monad,MonadIO,MonadFail,
+  -- See NOTE: [Python and threading]
+  deriving newtype (Functor,Applicative,Monad,MonadFail,
                     MonadThrow,MonadCatch,MonadMask)
--- See NOTE: [Python and threading]
+
+-- | Inject @IO@ into @Py@ monad without changing masking state
+--   (unlike 'liftIO')
+pyIO :: IO a -> Py a
+pyIO = Py
+
+-- | Removes exception masking
+instance MonadIO Py where
+  liftIO = Py . interruptible
 
 
 ----------------------------------------------------------------
