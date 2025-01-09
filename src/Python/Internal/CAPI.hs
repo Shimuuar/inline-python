@@ -7,6 +7,9 @@ module Python.Internal.CAPI
   , incref
     -- * Simple wrappers
   , basicNewDict
+  , basicNewSet
+  , basicGetIter
+  , basicIterNext
   , basicCallKwdOnly
   ) where
 
@@ -31,6 +34,16 @@ incref p = Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
 
 basicNewDict :: Py (Ptr PyObject)
 basicNewDict = Py [CU.exp| PyObject* { PyDict_New() } |]
+
+basicNewSet :: Py (Ptr PyObject)
+basicNewSet = Py [CU.exp| PyObject* { PySet_New(NULL) } |]
+
+basicGetIter :: Ptr PyObject -> Py (Ptr PyObject)
+basicGetIter p = Py [CU.exp| PyObject* { PyObject_GetIter( $(PyObject *p)) } |]
+
+basicIterNext :: Ptr PyObject -> Py (Ptr PyObject)
+basicIterNext p = Py [C.exp| PyObject* { PyIter_Next($(PyObject* p)) } |]
+
 
 -- | Call python function using only keyword arguments
 basicCallKwdOnly

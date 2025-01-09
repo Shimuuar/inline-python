@@ -14,13 +14,12 @@ module Python.Inline.Literal
 
 import Control.Monad
 import Control.Monad.Catch
-import Control.Monad.IO.Class
-import Control.Monad.Trans.Class
 import Control.Monad.Trans.Cont
 import Data.Bits
 import Data.Char
 import Data.Int
 import Data.Word
+import Data.Set                  qualified as Set
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Storable
@@ -58,13 +57,13 @@ class ToPy a where
   basicListToPy :: [a] -> Py (Ptr PyObject)
   basicListToPy xs = runProgram $ do
     let n = fromIntegral $ length xs :: CLLong
-    p_list <- checkNull (Py [CU.exp| PyObject* { PyList_New($(long long n)) } |])
-    onExceptionProg $ decref p_list
-    let loop !_ []     = pure p_list
+    p_list <- takeOwnership =<< checkNull (Py [CU.exp| PyObject* { PyList_New($(long long n)) } |])
+    let loop !_ []     = p_list <$ incref p_list
         loop  i (a:as) = basicToPy a >>= \case
           NULL -> pure nullPtr
           p_a  -> do
-            pyIO [CU.exp| void { PyList_SET_ITEM($(PyObject* p_list), $(long long i), $(PyObject* p_a)) } |]
+            -- NOTE: PyList_SET_ITEM steals reference
+            Py [CU.exp| void { PyList_SET_ITEM($(PyObject* p_list), $(long long i), $(PyObject* p_a)) } |]
             loop (i+1) as
     progPy $ loop 0 xs
 
@@ -383,14 +382,45 @@ instance (FromPy a) => FromPy [a] where
       } |]
     when (nullPtr == p_iter) $ throwM BadPyType
     --
-    let loop f = do
-          p <- Py [C.exp| PyObject* { PyIter_Next($(PyObject* p_iter)) } |]
-          checkThrowPyError
-          case p of
-            NULL -> pure f
-            _    -> do a <- basicFromPy p `finally` decref p
-                       loop (f . (a:))
-    ($ []) <$> loop id
+    f <- foldPyIterable p_iter
+      (\f p -> do a <- basicFromPy p
+                  pure (f . (a:)))
+      id
+    pure $ f []
+
+instance (ToPy a, Ord a) => ToPy (Set.Set a) where
+  basicToPy set = runProgram $ do
+    p_set <- takeOwnership =<< checkNull basicNewSet
+    progPy $ do
+      let loop []     = p_set <$ incref p_set
+          loop (x:xs) = basicToPy x >>= \case
+            NULL -> pure NULL
+            p_a  -> Py [C.exp| int { PySet_Add($(PyObject *p_set), $(PyObject *p_a)) }|] >>= \case
+              0 -> decref p_a >> loop xs
+              _ -> mustThrowPyError
+      loop $ Set.toList set
+
+instance (FromPy a, Ord a) => FromPy (Set.Set a) where
+  basicFromPy p_set = basicGetIter p_set >>= \case
+    NULL -> do Py [C.exp| void { PyErr_Clear() } |]
+               throwM BadPyType
+    p_iter -> foldPyIterable p_iter
+      (\s p -> do a <- basicFromPy p
+                  pure $! Set.insert a s)
+      Set.empty
+
+-- | Fold over iterable. Function takes ownership over iterator.
+foldPyIterable
+  :: Ptr PyObject                -- ^ Python iterator (not checked)
+  -> (a -> Ptr PyObject -> Py a) -- ^ Step function. It takes borrowed pointer.
+  -> a                           -- ^ Initial value
+  -> Py a
+foldPyIterable p_iter step a0
+  = loop a0 `finally` decref p_iter
+  where
+    loop a = basicIterNext p_iter >>= \case
+      NULL -> a <$ checkThrowPyError
+      p    -> loop =<< (step a p `finally` decref p)
 
 
 ----------------------------------------------------------------
