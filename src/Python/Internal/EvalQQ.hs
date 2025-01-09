@@ -168,7 +168,9 @@ getFunctionObject p_dict = do
 callFunctionObject :: Ptr PyObject -> Ptr PyObject -> Py (Ptr PyObject)
 callFunctionObject fun kwargs = Py [CU.block| PyObject* {
   PyObject* args = PyTuple_Pack(0);
-  return PyObject_Call($(PyObject *fun), args, $(PyObject *kwargs));
+  PyObject* res  = PyObject_Call($(PyObject *fun), args, $(PyObject *kwargs));
+  Py_DECREF(args);
+  return res;
   } |]
 
 
