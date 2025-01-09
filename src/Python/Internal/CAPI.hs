@@ -7,6 +7,7 @@ module Python.Internal.CAPI
   , incref
     -- * Simple wrappers
   , basicNewDict
+  , basicCallKwdOnly
   ) where
 
 import Foreign.Ptr
@@ -30,3 +31,15 @@ incref p = Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
 
 basicNewDict :: Py (Ptr PyObject)
 basicNewDict = Py [CU.exp| PyObject* { PyDict_New() } |]
+
+-- | Call python function using only keyword arguments
+basicCallKwdOnly
+  :: Ptr PyObject -- ^ Function object
+  -> Ptr PyObject -- ^ Keywords. Must be dictionary
+  -> Py (Ptr PyObject)
+basicCallKwdOnly fun kwd = Py [CU.block| PyObject* {
+  PyObject* args = PyTuple_Pack(0);
+  PyObject* res  = PyObject_Call($(PyObject *fun), args, $(PyObject *kwd));
+  Py_DECREF(args);
+  return res;
+  } |]

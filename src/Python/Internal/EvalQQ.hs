@@ -132,7 +132,7 @@ evaluatorPyf getSource = evalContT $ do
       NULL -> error "INTERNAL ERROR: _inline_python_ must be present"
       p    -> pure p
     -- Call python function we just constructed
-    callFunctionObject p_fun p_kwargs >>= \case
+    basicCallKwdOnly  p_fun p_kwargs >>= \case
       NULL  -> mustThrowPyError "evaluatorPyf"
       p_res -> newPyObject p_res
 
@@ -164,14 +164,6 @@ basicMainDict = Py [CU.block| PyObject* {
 getFunctionObject :: Ptr PyObject -> Py (Ptr PyObject)
 getFunctionObject p_dict = do
   Py [CU.exp| PyObject* { PyDict_GetItemString($(PyObject *p_dict), "_inline_python_") } |]
-
-callFunctionObject :: Ptr PyObject -> Ptr PyObject -> Py (Ptr PyObject)
-callFunctionObject fun kwargs = Py [CU.block| PyObject* {
-  PyObject* args = PyTuple_Pack(0);
-  PyObject* res  = PyObject_Call($(PyObject *fun), args, $(PyObject *kwargs));
-  Py_DECREF(args);
-  return res;
-  } |]
 
 
 
