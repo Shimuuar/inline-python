@@ -3,9 +3,7 @@
 -- |
 module Python.Internal.EvalQQ
   ( -- * Evaluators and QQ
-    pyExecExpr
-  , pyEvalExpr
-  , evaluatorPymain
+    evaluatorPymain
   , evaluatorPy_
   , evaluatorPye
   , evaluatorPyf
@@ -15,8 +13,6 @@ module Python.Internal.EvalQQ
   ) where
 
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.Cont
 import Data.Bits
 import Data.Char
 import Data.List                 (intercalate)
@@ -37,6 +33,7 @@ import Python.Types
 import Python.Internal.Types
 import Python.Internal.Program
 import Python.Internal.Eval
+import Python.Internal.CAPI
 import Python.Inline.Literal
 
 
@@ -56,9 +53,9 @@ pyExecExpr
   -> Ptr PyObject -- ^ Locals
   -> String       -- ^ Python source code
   -> Py ()
-pyExecExpr p_globals p_locals src = evalContT $ do
+pyExecExpr p_globals p_locals src = runProgram $ do
   p_py <- withPyCString src
-  lift $ do
+  progPy $ do
     Py [C.block| void {
       PyObject* globals = $(PyObject* p_globals);
       PyObject* locals  = $(PyObject* p_locals);
@@ -80,9 +77,9 @@ pyEvalExpr
   -> Ptr PyObject -- ^ Locals
   -> String       -- ^ Python source code
   -> Py PyObject
-pyEvalExpr p_globals p_locals src = evalContT $ do
+pyEvalExpr p_globals p_locals src = runProgram $ do
   p_py  <- withPyCString src
-  lift $ do
+  progPy $ do
     p_res <- Py [C.block| PyObject* {
       PyObject* globals = $(PyObject* p_globals);
       PyObject* locals  = $(PyObject* p_locals);
@@ -107,23 +104,23 @@ evaluatorPymain getSource = do
   pyExecExpr p_main p_main src
 
 evaluatorPy_ :: (Ptr PyObject -> Py String) -> Py ()
-evaluatorPy_ getSource = evalContT $ do
-  p_globals <- lift basicMainDict
-  p_locals  <- takeOwnership =<< lift basicNewDict
-  lift $ pyExecExpr p_globals p_locals =<< getSource p_locals
+evaluatorPy_ getSource = runProgram $ do
+  p_globals <- progPy basicMainDict
+  p_locals  <- takeOwnership =<< progPy basicNewDict
+  progPy $ pyExecExpr p_globals p_locals =<< getSource p_locals
 
 evaluatorPye :: (Ptr PyObject -> Py String) -> Py PyObject
-evaluatorPye getSource = evalContT $ do
-  p_globals <- lift basicMainDict
-  p_locals  <- takeOwnership =<< lift basicNewDict
-  lift $ pyEvalExpr p_globals p_locals =<< getSource p_locals
+evaluatorPye getSource = runProgram $ do
+  p_globals <- progPy basicMainDict
+  p_locals  <- takeOwnership =<< progPy basicNewDict
+  progPy $ pyEvalExpr p_globals p_locals =<< getSource p_locals
 
 evaluatorPyf :: (Ptr PyObject -> Py String) -> Py PyObject
-evaluatorPyf getSource = evalContT $ do
-  p_globals <- lift basicMainDict
-  p_locals  <- takeOwnership =<< lift basicNewDict
-  p_kwargs  <- takeOwnership =<< lift basicNewDict
-  lift $ do
+evaluatorPyf getSource = runProgram $ do
+  p_globals <- progPy basicMainDict
+  p_locals  <- takeOwnership =<< progPy basicNewDict
+  p_kwargs  <- takeOwnership =<< progPy basicNewDict
+  progPy $ do
     -- Create function in p_locals
     pyExecExpr p_globals p_locals =<< getSource p_kwargs
     -- Look up function
@@ -131,28 +128,21 @@ evaluatorPyf getSource = evalContT $ do
       NULL -> error "INTERNAL ERROR: _inline_python_ must be present"
       p    -> pure p
     -- Call python function we just constructed
-    callFunctionObject p_fun p_kwargs >>= \case
-      NULL  -> mustThrowPyError "evaluatorPyf"
-      p_res -> newPyObject p_res
+    newPyObject =<< throwOnNULL =<< basicCallKwdOnly p_fun p_kwargs
 
 
 basicBindInDict :: ToPy a => String -> a -> Ptr PyObject -> Py ()
-basicBindInDict name a p_dict = evalContT $ do
-  (p_key) <- withPyCString name
-  p_obj   <- takeOwnership =<< lift (basicToPy a)
-  lift $ case p_obj of
-    NULL -> mustThrowPyError "basicBindInDict"
-    _    -> do
-      r <- Py [C.block| int {
-        PyObject* p_obj = $(PyObject* p_obj);
-        return PyDict_SetItemString($(PyObject* p_dict), $(char* p_key), p_obj);
-        } |]
-      case r of
-        0 -> pure ()
-        _ -> mustThrowPyError "basicBindInDict"
-
-basicNewDict :: Py (Ptr PyObject)
-basicNewDict = Py [CU.exp| PyObject* { PyDict_New() } |]
+basicBindInDict name a p_dict = runProgram $ do
+  p_key <- withPyCString name
+  p_obj <- takeOwnership =<< progPy (throwOnNULL =<< basicToPy a)
+  progPy $ do
+    r <- Py [C.block| int {
+      PyObject* p_obj = $(PyObject* p_obj);
+      return PyDict_SetItemString($(PyObject* p_dict), $(char* p_key), p_obj);
+      } |]
+    case r of
+      0 -> pure ()
+      _ -> mustThrowPyError
 
 -- | Return dict of @__main__@ module
 basicMainDict :: Py (Ptr PyObject)
@@ -166,12 +156,6 @@ basicMainDict = Py [CU.block| PyObject* {
 getFunctionObject :: Ptr PyObject -> Py (Ptr PyObject)
 getFunctionObject p_dict = do
   Py [CU.exp| PyObject* { PyDict_GetItemString($(PyObject *p_dict), "_inline_python_") } |]
-
-callFunctionObject :: Ptr PyObject -> Ptr PyObject -> Py (Ptr PyObject)
-callFunctionObject fun kwargs = Py [CU.block| PyObject* {
-  PyObject* args = PyTuple_Pack(0);
-  return PyObject_Call($(PyObject *fun), args, $(PyObject *kwargs));
-  } |]
 
 
 

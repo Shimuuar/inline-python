@@ -19,8 +19,6 @@ module Python.Internal.Eval
     -- * GC-related
   , newPyObject
     -- * C-API wrappers
-  , decref
-  , incref
   , takeOwnership
   , ensureGIL
   , dropGIL
@@ -30,12 +28,14 @@ module Python.Internal.Eval
   , checkThrowPyError
   , mustThrowPyError
   , checkThrowBadPyType
+  , throwOnNULL
     -- * Debugging
   , debugPrintPy
   ) where
 
 import Control.Concurrent
 import Control.Concurrent.STM
+import Control.Exception         (interruptible)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
@@ -56,6 +56,7 @@ import Language.C.Inline.Unsafe   qualified as CU
 import Python.Internal.Types
 import Python.Internal.Util
 import Python.Internal.Program
+
 
 ----------------------------------------------------------------
 C.context (C.baseCtx <> pyCtx)
@@ -535,12 +536,6 @@ gcDecref p = [CU.block| void {
 -- C-API wrappers
 ----------------------------------------------------------------
 
-decref :: Ptr PyObject -> Py ()
-decref p = Py [CU.exp| void { Py_DECREF($(PyObject* p)) } |]
-
-incref :: Ptr PyObject -> Py ()
-incref p = Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
-
 -- | Ensure that we hold GIL for duration of action
 ensureGIL :: Py a -> Py a
 ensureGIL action = do
@@ -557,11 +552,8 @@ dropGIL action = do
   --       PyGILState_STATE is defined as enum. Let hope it will stay
   --       this way.
   st <- Py [CU.exp| PyThreadState* { PyEval_SaveThread() } |]
-  Py $ action `finally` [CU.exp| void { PyEval_RestoreThread($(PyThreadState *st)) } |]
-
--- | Decrement reference counter at end of ContT block
-takeOwnership :: Ptr PyObject -> Program r (Ptr PyObject)
-takeOwnership p = ContT $ \c -> c p `finally` decref p
+  Py $ interruptible action
+        `finally` [CU.exp| void { PyEval_RestoreThread($(PyThreadState *st)) } |]
 
 
 ----------------------------------------------------------------
@@ -581,11 +573,11 @@ convertHaskell2Py err = Py $ do
 -- | Convert python exception to haskell exception. Should only be
 --   called if there's unhandled python exception. Clears exception.
 convertPy2Haskell :: Py PyError
-convertPy2Haskell = evalContT $ do
+convertPy2Haskell = runProgram $ do
   p_errors <- withPyAllocaArray @(Ptr PyObject) 3
   p_len    <- withPyAlloca      @CLong
   -- Fetch error indicator
-  (p_type, p_value) <- liftIO $ do
+  (p_type, p_value) <- progIO $ do
     [CU.block| void {
        PyObject **p = $(PyObject** p_errors);
        PyErr_Fetch(p, p+1, p+2);
@@ -596,7 +588,7 @@ convertPy2Haskell = evalContT $ do
     pure (p_type,p_value)
   -- Convert exception type and value to strings.
   let pythonStr p = do
-        p_str <- liftIO [CU.block| PyObject* {
+        p_str <- progIO [CU.block| PyObject* {
           PyObject *s = PyObject_Str($(PyObject *p));
           if( PyErr_Occurred() ) {
               PyErr_Clear();
@@ -620,7 +612,7 @@ convertPy2Haskell = evalContT $ do
         case c_str of
           NULL -> pure ""
           _    -> peekCString c_str
-  liftIO $ PyError <$> toString s_type <*> toString s_value
+  progIO $ PyError <$> toString s_type <*> toString s_value
 
 
 -- | Throw python error as haskell exception if it's raised.
@@ -632,11 +624,17 @@ checkThrowPyError =
 
 -- | Throw python error as haskell exception if it's raised. If it's
 --   not that internal error. Another exception will be raised
-mustThrowPyError :: String -> Py a
-mustThrowPyError msg =
+mustThrowPyError :: Py a
+mustThrowPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
-    NULL -> error $ "mustThrowPyError: no python exception raised. " ++ msg
+    NULL -> error $ "mustThrowPyError: no python exception raised."
     _    -> throwM =<< convertPy2Haskell
+
+-- | Calls mustThrowPyError if pointer is null or returns it unchanged
+throwOnNULL :: Ptr PyObject -> Py (Ptr PyObject)
+throwOnNULL = \case
+  NULL -> mustThrowPyError
+  p    -> pure p
 
 checkThrowBadPyType :: Py ()
 checkThrowBadPyType = do

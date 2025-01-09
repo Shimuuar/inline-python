@@ -4,7 +4,8 @@ module Python.Types
   ( -- * @Py@ monad
     Py
   , runPy
-  , PyObject(..)
+  , pyIO
+  , PyObject
   , unsafeWithPyObject
   , PyError(..)
   ) where

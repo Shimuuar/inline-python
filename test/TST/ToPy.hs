@@ -1,10 +1,13 @@
 -- |
 module TST.ToPy (tests) where
 
+import Data.Set qualified as Set
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
 import Python.Inline.QQ
+import TST.Util
+
 
 tests :: TestTree
 tests = testGroup "ToPy"
@@ -30,4 +33,10 @@ tests = testGroup "ToPy"
   , testCase "list" $ runPy $
       let x = [1 .. 5::Int]
       in [py_| assert x_hs == [1,2,3,4,5] |]
+  , testCase "set<int>" $ runPy $
+      let x = Set.fromList [1, 5, 3::Int]
+      in [py_| assert x_hs == {1,3,5} |]
+  , testCase "set unhashable" $ runPy $
+      let x = Set.fromList [[1], [5], [3::Int]]
+      in throwsPy [py_| assert x_hs == {1,3,5} |]
   ]

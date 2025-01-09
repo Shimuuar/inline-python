@@ -5,6 +5,7 @@ module TST.Roundtrip (tests) where
 import Data.Int
 import Data.Word
 import Data.Typeable
+import Data.Set        (Set)
 import Foreign.C.Types
 
 import Test.Tasty
@@ -51,6 +52,7 @@ tests = testGroup "Roundtrip"
     , testRoundtrip @(Int,Int,Int,Char)
     , testRoundtrip @[Int]
     , testRoundtrip @[[Int]]
+    , testRoundtrip @(Set Int)
     -- , testRoundtrip @String -- Trips on zero byte as it should
     ]
   , testGroup "OutOfRange"
