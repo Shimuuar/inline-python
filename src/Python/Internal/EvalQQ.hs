@@ -3,9 +3,7 @@
 -- |
 module Python.Internal.EvalQQ
   ( -- * Evaluators and QQ
-    pyExecExpr
-  , pyEvalExpr
-  , evaluatorPymain
+    evaluatorPymain
   , evaluatorPy_
   , evaluatorPye
   , evaluatorPyf
@@ -139,8 +137,8 @@ evaluatorPyf getSource = evalContT $ do
 
 basicBindInDict :: ToPy a => String -> a -> Ptr PyObject -> Py ()
 basicBindInDict name a p_dict = evalContT $ do
-  (p_key) <- withPyCString name
-  p_obj   <- takeOwnership =<< lift (basicToPy a)
+  p_key <- withPyCString name
+  p_obj <- takeOwnership =<< lift (basicToPy a)
   lift $ case p_obj of
     NULL -> mustThrowPyError "basicBindInDict"
     _    -> do
