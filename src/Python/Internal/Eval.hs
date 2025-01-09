@@ -35,6 +35,7 @@ module Python.Internal.Eval
 
 import Control.Concurrent
 import Control.Concurrent.STM
+import Control.Exception         (interruptible)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
@@ -551,7 +552,8 @@ dropGIL action = do
   --       PyGILState_STATE is defined as enum. Let hope it will stay
   --       this way.
   st <- Py [CU.exp| PyThreadState* { PyEval_SaveThread() } |]
-  Py $ action `finally` [CU.exp| void { PyEval_RestoreThread($(PyThreadState *st)) } |]
+  Py $ interruptible action
+        `finally` [CU.exp| void { PyEval_RestoreThread($(PyThreadState *st)) } |]
 
 
 ----------------------------------------------------------------
@@ -571,11 +573,11 @@ convertHaskell2Py err = Py $ do
 -- | Convert python exception to haskell exception. Should only be
 --   called if there's unhandled python exception. Clears exception.
 convertPy2Haskell :: Py PyError
-convertPy2Haskell = evalContT $ do
+convertPy2Haskell = runProgram $ do
   p_errors <- withPyAllocaArray @(Ptr PyObject) 3
   p_len    <- withPyAlloca      @CLong
   -- Fetch error indicator
-  (p_type, p_value) <- liftIO $ do
+  (p_type, p_value) <- progIO $ do
     [CU.block| void {
        PyObject **p = $(PyObject** p_errors);
        PyErr_Fetch(p, p+1, p+2);
@@ -586,7 +588,7 @@ convertPy2Haskell = evalContT $ do
     pure (p_type,p_value)
   -- Convert exception type and value to strings.
   let pythonStr p = do
-        p_str <- liftIO [CU.block| PyObject* {
+        p_str <- progIO [CU.block| PyObject* {
           PyObject *s = PyObject_Str($(PyObject *p));
           if( PyErr_Occurred() ) {
               PyErr_Clear();
@@ -610,7 +612,7 @@ convertPy2Haskell = evalContT $ do
         case c_str of
           NULL -> pure ""
           _    -> peekCString c_str
-  liftIO $ PyError <$> toString s_type <*> toString s_value
+  progIO $ PyError <$> toString s_type <*> toString s_value
 
 
 -- | Throw python error as haskell exception if it's raised.

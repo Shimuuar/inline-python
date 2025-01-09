@@ -1,6 +1,9 @@
 -- |
 module Python.Internal.Program
-  ( Program
+  ( Program(..)
+  , runProgram
+  , progPy
+  , progIO
     -- * Control flow
   , abort
   , abortM
@@ -17,6 +20,7 @@ module Python.Internal.Program
   ) where
 
 import Control.Monad.Trans.Cont
+import Control.Monad.Trans.Class
 import Control.Monad.Catch
 import Data.Coerce
 import Foreign.Ptr
@@ -31,22 +35,32 @@ import Python.Internal.Util
 import Python.Internal.CAPI
 
 
--- | Internally we usually wrap 'Py' into 'ContT' in order get early
---   exit and avoid building ladder of 
-type Program r a = ContT r Py a
+-- | This monad wraps 'Py' into 'ContT' in order get early exit,
+--   applying @finally@ while avoiding building huge ladders.
+newtype Program r a = Program (ContT r Py a)
+  deriving newtype (Functor, Applicative, Monad)
 
+runProgram :: Program a a -> Py a
+runProgram (Program m) = evalContT m
+
+-- | Does not change masking state
+progIO :: IO a -> Program r a
+progIO = Program . lift . pyIO
+
+progPy :: Py a -> Program r a
+progPy = Program . lift
 
 -- | Early exit from continuation monad.
-abort :: Monad m => r -> ContT r m a
-abort r = ContT $ \_ -> pure r
+abort :: r -> Program r a
+abort r = Program $ ContT $ \_ -> pure r
 
 -- | Early exit from continuation monad.
-abortM :: Monad m => m r -> ContT r m a
-abortM m = ContT $ \_ -> m
+abortM :: Py r -> Program r a
+abortM m = Program $ ContT $ \_ -> m
 
 -- | If result of computation is NULL return NULL immediately.
 checkNull :: Py (Ptr a) -> Program (Ptr a) (Ptr a)
-checkNull action = ContT $ \cnt -> action >>= \case
+checkNull action = Program $ ContT $ \cnt -> action >>= \case
   NULL -> pure nullPtr
   p    -> cnt p
 
@@ -54,17 +68,17 @@ checkNull action = ContT $ \cnt -> action >>= \case
 finallyProg
   :: Py b -- ^ Finalizer
   -> Program r ()
-finallyProg fini = ContT $ \c -> c () `finally` fini
+finallyProg fini = Program $ ContT $ \c -> c () `finally` fini
 
 -- | Evaluate finalizer if exception is thrown.
 onExceptionProg
   :: Py b -- ^ Finalizer
   -> Program r ()
-onExceptionProg fini = ContT $ \c -> c () `onException` fini
+onExceptionProg fini = Program $ ContT $ \c -> c () `onException` fini
 
 -- | Decrement reference counter at end of ContT block
 takeOwnership :: Ptr PyObject -> Program r (Ptr PyObject)
-takeOwnership p = ContT $ \c -> c p `finally` decref p
+takeOwnership p = Program $ ContT $ \c -> c p `finally` decref p
 
 
 ----------------------------------------------------------------

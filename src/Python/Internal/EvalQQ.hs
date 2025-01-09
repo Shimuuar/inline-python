@@ -13,8 +13,6 @@ module Python.Internal.EvalQQ
   ) where
 
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.Cont
 import Data.Bits
 import Data.Char
 import Data.List                 (intercalate)
@@ -55,9 +53,9 @@ pyExecExpr
   -> Ptr PyObject -- ^ Locals
   -> String       -- ^ Python source code
   -> Py ()
-pyExecExpr p_globals p_locals src = evalContT $ do
+pyExecExpr p_globals p_locals src = runProgram $ do
   p_py <- withPyCString src
-  lift $ do
+  progPy $ do
     Py [C.block| void {
       PyObject* globals = $(PyObject* p_globals);
       PyObject* locals  = $(PyObject* p_locals);
@@ -79,9 +77,9 @@ pyEvalExpr
   -> Ptr PyObject -- ^ Locals
   -> String       -- ^ Python source code
   -> Py PyObject
-pyEvalExpr p_globals p_locals src = evalContT $ do
+pyEvalExpr p_globals p_locals src = runProgram $ do
   p_py  <- withPyCString src
-  lift $ do
+  progPy $ do
     p_res <- Py [C.block| PyObject* {
       PyObject* globals = $(PyObject* p_globals);
       PyObject* locals  = $(PyObject* p_locals);
@@ -106,23 +104,23 @@ evaluatorPymain getSource = do
   pyExecExpr p_main p_main src
 
 evaluatorPy_ :: (Ptr PyObject -> Py String) -> Py ()
-evaluatorPy_ getSource = evalContT $ do
-  p_globals <- lift basicMainDict
-  p_locals  <- takeOwnership =<< lift basicNewDict
-  lift $ pyExecExpr p_globals p_locals =<< getSource p_locals
+evaluatorPy_ getSource = runProgram $ do
+  p_globals <- progPy basicMainDict
+  p_locals  <- takeOwnership =<< progPy basicNewDict
+  progPy $ pyExecExpr p_globals p_locals =<< getSource p_locals
 
 evaluatorPye :: (Ptr PyObject -> Py String) -> Py PyObject
-evaluatorPye getSource = evalContT $ do
-  p_globals <- lift basicMainDict
-  p_locals  <- takeOwnership =<< lift basicNewDict
-  lift $ pyEvalExpr p_globals p_locals =<< getSource p_locals
+evaluatorPye getSource = runProgram $ do
+  p_globals <- progPy basicMainDict
+  p_locals  <- takeOwnership =<< progPy basicNewDict
+  progPy $ pyEvalExpr p_globals p_locals =<< getSource p_locals
 
 evaluatorPyf :: (Ptr PyObject -> Py String) -> Py PyObject
-evaluatorPyf getSource = evalContT $ do
-  p_globals <- lift basicMainDict
-  p_locals  <- takeOwnership =<< lift basicNewDict
-  p_kwargs  <- takeOwnership =<< lift basicNewDict
-  lift $ do
+evaluatorPyf getSource = runProgram $ do
+  p_globals <- progPy basicMainDict
+  p_locals  <- takeOwnership =<< progPy basicNewDict
+  p_kwargs  <- takeOwnership =<< progPy basicNewDict
+  progPy $ do
     -- Create function in p_locals
     pyExecExpr p_globals p_locals =<< getSource p_kwargs
     -- Look up function
@@ -134,10 +132,10 @@ evaluatorPyf getSource = evalContT $ do
 
 
 basicBindInDict :: ToPy a => String -> a -> Ptr PyObject -> Py ()
-basicBindInDict name a p_dict = evalContT $ do
+basicBindInDict name a p_dict = runProgram $ do
   p_key <- withPyCString name
-  p_obj <- takeOwnership =<< lift (throwOnNULL =<< basicToPy a)
-  lift $ do
+  p_obj <- takeOwnership =<< progPy (throwOnNULL =<< basicToPy a)
+  progPy $ do
     r <- Py [C.block| int {
       PyObject* p_obj = $(PyObject* p_obj);
       return PyDict_SetItemString($(PyObject* p_dict), $(char* p_key), p_obj);
