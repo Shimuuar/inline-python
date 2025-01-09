@@ -37,6 +37,7 @@ import Python.Types
 import Python.Internal.Types
 import Python.Internal.Program
 import Python.Internal.Eval
+import Python.Internal.CAPI
 import Python.Inline.Literal
 
 
@@ -150,9 +151,6 @@ basicBindInDict name a p_dict = evalContT $ do
       case r of
         0 -> pure ()
         _ -> mustThrowPyError "basicBindInDict"
-
-basicNewDict :: Py (Ptr PyObject)
-basicNewDict = Py [CU.exp| PyObject* { PyDict_New() } |]
 
 -- | Return dict of @__main__@ module
 basicMainDict :: Py (Ptr PyObject)

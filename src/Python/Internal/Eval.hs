@@ -54,7 +54,6 @@ import Language.C.Inline.Unsafe   qualified as CU
 import Python.Internal.Types
 import Python.Internal.Util
 import Python.Internal.Program
-import Python.Internal.CAPI
 
 
 ----------------------------------------------------------------
