@@ -71,6 +71,7 @@ Library
     Python.Inline
     Python.Types
   Other-modules:
+    Python.Internal.CAPI
     Python.Internal.Eval
     Python.Internal.EvalQQ
     Python.Internal.Program

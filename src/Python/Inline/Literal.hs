@@ -32,7 +32,7 @@ import Language.C.Inline.Unsafe  qualified as CU
 import Python.Types
 import Python.Internal.Types
 import Python.Internal.Eval
-
+import Python.Internal.CAPI
 import Python.Internal.Program
 
 ----------------------------------------------------------------

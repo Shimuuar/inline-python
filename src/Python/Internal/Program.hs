@@ -7,6 +7,7 @@ module Python.Internal.Program
   , checkNull
   , finallyProg
   , onExceptionProg
+  , takeOwnership
     -- * Allocators
   , withPyAlloca
   , withPyAllocaArray
@@ -27,6 +28,7 @@ import Foreign.Storable
 
 import Python.Internal.Types
 import Python.Internal.Util
+import Python.Internal.CAPI
 
 
 -- | Internally we usually wrap 'Py' into 'ContT' in order get early
@@ -59,6 +61,10 @@ onExceptionProg
   :: Py b -- ^ Finalizer
   -> Program r ()
 onExceptionProg fini = ContT $ \c -> c () `onException` fini
+
+-- | Decrement reference counter at end of ContT block
+takeOwnership :: Ptr PyObject -> Program r (Ptr PyObject)
+takeOwnership p = ContT $ \c -> c p `finally` decref p
 
 
 ----------------------------------------------------------------

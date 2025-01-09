@@ -19,8 +19,6 @@ module Python.Internal.Eval
     -- * GC-related
   , newPyObject
     -- * C-API wrappers
-  , decref
-  , incref
   , takeOwnership
   , ensureGIL
   , dropGIL
@@ -56,6 +54,8 @@ import Language.C.Inline.Unsafe   qualified as CU
 import Python.Internal.Types
 import Python.Internal.Util
 import Python.Internal.Program
+import Python.Internal.CAPI
+
 
 ----------------------------------------------------------------
 C.context (C.baseCtx <> pyCtx)
@@ -535,12 +535,6 @@ gcDecref p = [CU.block| void {
 -- C-API wrappers
 ----------------------------------------------------------------
 
-decref :: Ptr PyObject -> Py ()
-decref p = Py [CU.exp| void { Py_DECREF($(PyObject* p)) } |]
-
-incref :: Ptr PyObject -> Py ()
-incref p = Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
-
 -- | Ensure that we hold GIL for duration of action
 ensureGIL :: Py a -> Py a
 ensureGIL action = do
@@ -558,10 +552,6 @@ dropGIL action = do
   --       this way.
   st <- Py [CU.exp| PyThreadState* { PyEval_SaveThread() } |]
   Py $ action `finally` [CU.exp| void { PyEval_RestoreThread($(PyThreadState *st)) } |]
-
--- | Decrement reference counter at end of ContT block
-takeOwnership :: Ptr PyObject -> Program r (Ptr PyObject)
-takeOwnership p = ContT $ \c -> c p `finally` decref p
 
 
 ----------------------------------------------------------------
