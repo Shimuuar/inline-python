@@ -7,7 +7,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
 import Python.Inline.QQ
-import Python.Types
+import Python.Inline.Types
 
 tests :: TestTree
 tests = testGroup "FromPy"

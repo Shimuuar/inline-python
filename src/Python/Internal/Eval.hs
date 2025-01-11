@@ -40,6 +40,7 @@ import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
+import Data.Maybe
 import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -53,6 +54,7 @@ import System.IO.Unsafe
 import Language.C.Inline          qualified as C
 import Language.C.Inline.Unsafe   qualified as CU
 
+import Python.Internal.CAPI
 import Python.Internal.Types
 import Python.Internal.Util
 import Python.Internal.Program
@@ -231,8 +233,8 @@ callbackEnsurePyLock action = do
 
 acquireLock :: ThreadId -> STM ()
 acquireLock tid = readTVar globalPyLock >>= \case
-  LockUninialized -> error "Python is not started"
-  LockFinalized   -> error "Python is already stopped"
+  LockUninialized -> throwSTM PythonNotInitialized
+  LockFinalized   -> throwSTM PythonIsFinalized
   LockedByGC      -> retry
   LockUnlocked    -> writeTVar globalPyLock $ Locked tid []
   Locked t xs
@@ -241,20 +243,20 @@ acquireLock tid = readTVar globalPyLock >>= \case
 
 grabLock :: ThreadId -> STM ()
 grabLock tid = readTVar globalPyLock >>= \case
-  LockUninialized -> error "Python is not started"
-  LockFinalized   -> error "Python is already stopped"
+  LockUninialized -> throwSTM PythonNotInitialized
+  LockFinalized   -> throwSTM PythonIsFinalized
   LockedByGC      -> retry
   LockUnlocked    -> writeTVar globalPyLock $ Locked tid []
   Locked t xs     -> writeTVar globalPyLock $ Locked tid (t : xs)
 
 releaseLock :: ThreadId -> STM ()
 releaseLock tid = readTVar globalPyLock >>= \case
-  LockUninialized -> error "Python is not started"
-  LockFinalized   -> error "Python is already stopped"
-  LockUnlocked    -> error "INTERNAL ERROR releasing unlocked"
-  LockedByGC      -> error "INTERNAL ERROR lock held by GC"
+  LockUninialized -> throwSTM PythonNotInitialized
+  LockFinalized   -> throwSTM PythonIsFinalized
+  LockUnlocked    -> throwSTM $ PyInternalError "releaseLock: releasing LockUnlocked"
+  LockedByGC      -> throwSTM $ PyInternalError "releaseLock: releasing LockedByGC"
   Locked t xs
-    | t /= tid  -> error "INTERNAL ERROR releasing wrong lock"
+    | t /= tid  -> throwSTM $ PyInternalError "releaseLock: releasing  wrong lock"
     | otherwise -> writeTVar globalPyLock $! case xs of
         []    -> LockUnlocked
         t':ts -> Locked t' ts
@@ -290,8 +292,8 @@ doInializePython = do
   -- First we need to grab global python lock on haskell side
   join $ atomically $ do
     readTVar globalPyState >>= \case
-      Finalized        -> error "Python was already finalized"
-      InitFailed       -> error "Python was unable to initialize"
+      Finalized        -> throwSTM PythonNotInitialized
+      InitFailed       -> throwSTM PythonIsFinalized
       InInitialization -> retry
       InFinalization   -> retry
       Running1{}       -> pure $ pure ()
@@ -401,8 +403,8 @@ doInializePythonIO = do
 
 doFinalizePython :: IO ()
 doFinalizePython = join $ atomically $ readTVar globalPyState >>= \case
-  NotInitialized   -> error "Python is not initialized"
-  InitFailed       -> error "Python failed to initialize"
+  NotInitialized   -> throwSTM PythonNotInitialized
+  InitFailed       -> throwSTM PythonIsFinalized
   Finalized        -> pure $ pure ()
   InInitialization -> retry
   InFinalization   -> retry
@@ -419,8 +421,8 @@ doFinalizePython = join $ atomically $ readTVar globalPyState >>= \case
     takeMVar resp
   where
     checkLock action = readTVar globalPyLock >>= \case
-      LockUninialized -> error "Internal error: Lock not initialized"
-      LockFinalized   -> error "Internal error: Lock is already finalized"
+      LockUninialized -> throwSTM $ PyInternalError "doFinalizePython LockUninialized"
+      LockFinalized   -> throwSTM $ PyInternalError "doFinalizePython LockFinalized"
       Locked{}        -> retry
       LockedByGC      -> retry
       LockUnlocked    -> do
@@ -459,12 +461,12 @@ runPyInMain :: Py a -> IO a
 runPyInMain py
   -- Multithreaded RTS
   | rtsSupportsBoundThreads = join $ atomically $ readTVar globalPyState >>= \case
-      NotInitialized   -> error "Python is not initialized"
-      InitFailed       -> error "Python failed to initialize"
-      Finalized        -> error "Python is already finalized"
+      NotInitialized   -> throwSTM PythonNotInitialized
+      InitFailed       -> throwSTM PyInitializationFailed
+      Finalized        -> throwSTM PythonIsFinalized
       InInitialization -> retry
       InFinalization   -> retry
-      Running1         -> error "INTERNAL ERROR"
+      Running1         -> throwSTM $ PyInternalError "runPyInMain: Running1"
       RunningN _ eval tid_main _ -> do
         acquireLock tid_main
         pure
@@ -572,10 +574,9 @@ convertHaskell2Py err = Py $ do
 
 -- | Convert python exception to haskell exception. Should only be
 --   called if there's unhandled python exception. Clears exception.
-convertPy2Haskell :: Py PyError
+convertPy2Haskell :: Py PyException
 convertPy2Haskell = runProgram $ do
   p_errors <- withPyAllocaArray @(Ptr PyObject) 3
-  p_len    <- withPyAlloca      @CLong
   -- Fetch error indicator
   (p_type, p_value) <- progIO $ do
     [CU.block| void {
@@ -587,40 +588,24 @@ convertPy2Haskell = runProgram $ do
     -- Traceback is not used ATM
     pure (p_type,p_value)
   -- Convert exception type and value to strings.
-  let pythonStr p = do
-        p_str <- progIO [CU.block| PyObject* {
-          PyObject *s = PyObject_Str($(PyObject *p));
-          if( PyErr_Occurred() ) {
-              PyErr_Clear();
-          }
-          return s;
-          } |]
-        case p_str of
-          NULL -> abort UncovertablePyError
-          _    -> pure p_str
-  s_type  <- takeOwnership =<< pythonStr p_type
-  s_value <- takeOwnership =<< pythonStr p_value
-  -- Convert to haskell strings
-  let toString p = do
-        c_str <- [CU.block| const char* {
-          const char* s = PyUnicode_AsUTF8AndSize($(PyObject *p), $(long *p_len));
-          if( PyErr_Occurred() ) {
-              PyErr_Clear();
-          }
-          return s;
-          } |]
-        case c_str of
-          NULL -> pure ""
-          _    -> peekCString c_str
-  progIO $ PyError <$> toString s_type <*> toString s_value
-
+  progPy $ do
+    s_type  <- pyobjectStrAsHask p_type
+    s_value <- pyobjectStrAsHask p_value
+    incref p_value
+    exc     <- newPyObject p_value
+    let bad_str = "__str__ call failed"
+    pure $ PyException
+      { ty        = fromMaybe bad_str s_type
+      , str       = fromMaybe bad_str s_value
+      , exception = exc
+      }
 
 -- | Throw python error as haskell exception if it's raised.
 checkThrowPyError :: Py ()
 checkThrowPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> pure ()
-    _    -> throwM =<< convertPy2Haskell
+    _    -> throwM . PyError =<< convertPy2Haskell
 
 -- | Throw python error as haskell exception if it's raised. If it's
 --   not that internal error. Another exception will be raised
@@ -628,7 +613,7 @@ mustThrowPyError :: Py a
 mustThrowPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> error $ "mustThrowPyError: no python exception raised."
-    _    -> throwM =<< convertPy2Haskell
+    _    -> throwM . PyError =<< convertPy2Haskell
 
 -- | Calls mustThrowPyError if pointer is null or returns it unchanged
 throwOnNULL :: Ptr PyObject -> Py (Ptr PyObject)

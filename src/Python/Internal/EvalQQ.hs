@@ -13,6 +13,7 @@ module Python.Internal.EvalQQ
   ) where
 
 import Control.Monad.IO.Class
+import Control.Monad.Catch
 import Data.Bits
 import Data.Char
 import Data.List                 (intercalate)
@@ -29,7 +30,6 @@ import Language.C.Inline.Unsafe   qualified as CU
 import Language.Haskell.TH.Lib    qualified as TH
 import Language.Haskell.TH.Syntax qualified as TH
 
-import Python.Types
 import Python.Internal.Types
 import Python.Internal.Program
 import Python.Internal.Eval
@@ -125,7 +125,7 @@ evaluatorPyf getSource = runProgram $ do
     pyExecExpr p_globals p_locals =<< getSource p_kwargs
     -- Look up function
     p_fun <- getFunctionObject p_locals >>= \case
-      NULL -> error "INTERNAL ERROR: _inline_python_ must be present"
+      NULL -> throwM $ PyInternalError "_inline_python_ must be present"
       p    -> pure p
     -- Call python function we just constructed
     newPyObject =<< throwOnNULL =<< basicCallKwdOnly p_fun p_kwargs
@@ -204,7 +204,7 @@ expQQ mode qq_src = do
                 ]
     case code of
       ExitSuccess   -> pure $ words stdout
-      ExitFailure{} -> error stderr
+      ExitFailure{} -> fail stderr
   let args = [ [| basicBindInDict $(TH.lift nm) $(TH.dyn (chop nm)) |]
              | nm <- antis
              ]

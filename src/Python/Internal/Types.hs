@@ -11,6 +11,8 @@ module Python.Internal.Types
   , unsafeWithPyObject
   , PyThreadState
   , PyError(..)
+  , PyException(..)
+  , PyInternalError(..)
   , Py(..)
   , pyIO
     -- * inline-C
@@ -46,18 +48,15 @@ data PyThreadState
 -- | Some python object. Since almost everything in python is mutable
 --   it could only be accessed only in IO monad.
 newtype PyObject = PyObject (ForeignPtr PyObject)
+  deriving stock Show
 
 unsafeWithPyObject :: forall a. PyObject -> (Ptr PyObject -> Py a) -> Py a
 unsafeWithPyObject = coerce (unsafeWithForeignPtr @PyObject @a)
 
 -- | Python exception converted to haskell.
 data PyError
-  = PyError String String
+  = PyError !PyException
     -- ^ Python exception. Contains exception type and message as strings.
-  | UncovertablePyError
-    -- ^ Python exception that could not be converted to haskell for
-    --   some reason. Its appearance means that something went
-    --   seriously wrong.
   | BadPyType
     -- ^ It's not possible to convert given python value to a haskell
     --   value
@@ -67,10 +66,26 @@ data PyError
     --   result in this exception.
   | PyInitializationFailed
     -- ^ Initialization of python interpreter failed
-  deriving stock (Show)
+  | PythonNotInitialized
+    -- ^ Python interpreter is not initialized
+  | PythonIsFinalized
+    -- ^ Python interpreter is not initialized    
+  deriving stock    (Show)
+  deriving anyclass (Exception)
 
-instance Exception PyError
+-- | Python exception converted to haskell value
+data PyException = PyException
+  { ty        :: !String   -- ^ Exception type as a string
+  , str       :: !String   -- ^ String representation of an exception
+  , exception :: !PyObject -- ^ Exception object
+  }
+  deriving stock Show
 
+-- | Internal error. If this exception is thrown it means there's bug
+--   in a library.
+data PyInternalError = PyInternalError String
+  deriving stock    (Show)
+  deriving anyclass (Exception)
 
 -- | Monad for code which is interacts with python interpreter. Only
 --   one haskell thread can interact with python interpreter at a

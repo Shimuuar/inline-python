@@ -66,10 +66,10 @@ Library
   pkgconfig-depends: python3-embed
   --
   Exposed-modules:
+    Python.Inline
     Python.Inline.Literal
     Python.Inline.QQ
-    Python.Inline
-    Python.Types
+    Python.Inline.Types
   Other-modules:
     Python.Internal.CAPI
     Python.Internal.Eval
