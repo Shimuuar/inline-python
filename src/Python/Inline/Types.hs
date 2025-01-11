@@ -1,6 +1,6 @@
 -- |
 -- Data types and utilities.
-module Python.Types
+module Python.Inline.Types
   ( -- * @Py@ monad
     Py
   , runPy

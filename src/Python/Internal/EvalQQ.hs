@@ -29,7 +29,6 @@ import Language.C.Inline.Unsafe   qualified as CU
 import Language.Haskell.TH.Lib    qualified as TH
 import Language.Haskell.TH.Syntax qualified as TH
 
-import Python.Types
 import Python.Internal.Types
 import Python.Internal.Program
 import Python.Internal.Eval

@@ -28,7 +28,6 @@ import GHC.Float                 (float2Double, double2Float)
 import Language.C.Inline         qualified as C
 import Language.C.Inline.Unsafe  qualified as CU
 
-import Python.Types
 import Python.Internal.Types
 import Python.Internal.Eval
 import Python.Internal.CAPI
