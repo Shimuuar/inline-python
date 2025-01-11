@@ -103,7 +103,7 @@ fromPy' py = unsafeWithPyObject py basicFromPy
 -- | Convert haskell value to a python object.
 toPy :: ToPy a => a -> Py PyObject
 toPy a = basicToPy a >>= \case
-  NULL -> throwM =<< convertPy2Haskell
+  NULL -> mustThrowPyError
   p    -> newPyObject p
 
 
