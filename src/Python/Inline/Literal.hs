@@ -20,6 +20,7 @@ import Data.Char
 import Data.Int
 import Data.Word
 import Data.Set                  qualified as Set
+import Data.Map.Strict           qualified as Map
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Storable
@@ -407,6 +408,33 @@ instance (FromPy a, Ord a) => FromPy (Set.Set a) where
       (\s p -> do a <- basicFromPy p
                   pure $! Set.insert a s)
       Set.empty
+
+
+instance (ToPy k, ToPy v, Ord k) => ToPy (Map.Map k v) where
+  basicToPy dct = runProgram $ do
+    p_dict <- takeOwnership =<< checkNull basicNewDict
+    progPy $ do
+      let loop []         = p_dict <$ incref p_dict
+          loop ((k,v):xs) = basicToPy k >>= \case
+            NULL -> mustThrowPyError
+            p_k  -> flip finally (decref p_k) $ basicToPy v >>= \case
+              NULL -> mustThrowPyError
+              p_v  -> Py [CU.exp| int { PyDict_SetItem($(PyObject *p_dict), $(PyObject* p_k), $(PyObject *p_v)) }|] >>= \case
+                0 -> loop xs
+                _ -> nullPtr <$ decref p_v
+      loop $ Map.toList dct
+
+instance (FromPy k, FromPy v, Ord k) => FromPy (Map.Map k v) where
+  basicFromPy p_dct = basicGetIter p_dct >>= \case
+    NULL   -> do Py [C.exp| void { PyErr_Clear() } |]
+                 throwM BadPyType
+    p_iter -> foldPyIterable p_iter
+      (\m p -> do k <- basicFromPy p
+                  v <- Py [CU.exp| PyObject* { PyDict_GetItem($(PyObject* p_dct), $(PyObject *p)) }|] >>= \case
+                    NULL -> throwM BadPyType
+                    p_v  -> basicFromPy p_v
+                  pure $! Map.insert k v m)
+      Map.empty
 
 -- | Fold over iterable. Function takes ownership over iterator.
 foldPyIterable

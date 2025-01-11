@@ -2,6 +2,7 @@
 module TST.ToPy (tests) where
 
 import Data.Set qualified as Set
+import Data.Map.Strict qualified as Map
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
@@ -38,5 +39,11 @@ tests = testGroup "ToPy"
       in [py_| assert x_hs == {1,3,5} |]
   , testCase "set unhashable" $ runPy $
       let x = Set.fromList [[1], [5], [3::Int]]
-      in throwsPy [py_| assert x_hs == {1,3,5} |]
+      in throwsPy [py_| x_hs |]
+  , testCase "dict<int,int>" $ runPy $
+      let x = Map.fromList [(1,10), (5,50), (3,30)] :: Map.Map Int Int
+      in [py_| assert x_hs == {1:10, 3:30, 5:50} |]
+  , testCase "dict unhashable" $ runPy $
+      let x = Map.fromList [([1],10), ([5],50), ([3],30)] :: Map.Map [Int] Int
+      in throwsPy [py_| x_hs |]
   ]
