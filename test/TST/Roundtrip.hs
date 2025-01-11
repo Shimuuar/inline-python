@@ -6,6 +6,7 @@ import Data.Int
 import Data.Word
 import Data.Typeable
 import Data.Set        (Set)
+import Data.Map.Strict (Map)
 import Foreign.C.Types
 
 import Test.Tasty
@@ -53,6 +54,7 @@ tests = testGroup "Roundtrip"
     , testRoundtrip @[Int]
     , testRoundtrip @[[Int]]
     , testRoundtrip @(Set Int)
+    , testRoundtrip @(Map Int Int)
     -- , testRoundtrip @String -- Trips on zero byte as it should
     ]
   , testGroup "OutOfRange"
