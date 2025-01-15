@@ -443,9 +443,9 @@ data InterruptMain = InterruptMain
   deriving stock    Show
   deriving anyclass Exception
 
--- | Execute python action. It will take global lock and no other
---   python action could start execution until one currently running
---   finished execution normally or with exception.
+-- | Execute python action. It will take and hold global lock while
+--   code is executed. Python exceptions raised during execution are
+--   converted to haskell exception 'PyError'.
 runPy :: Py a -> IO a
 -- See NOTE: [Python and threading]
 runPy py
@@ -456,6 +456,10 @@ runPy py
     -- it wasn't. Better than segfault isn't it?
     go = ensurePyLock $ unPy (ensureGIL py)
 
+-- | Same as 'runPy' but will make sure that code is run in python's
+--   main thread. It's thread in which python's interpreter was
+--   initialized. Some python's libraries may need that. It has higher
+--   call overhead compared to 'runPy'.
 runPyInMain :: Py a -> IO a
 -- See NOTE: [Python and threading]
 runPyInMain py

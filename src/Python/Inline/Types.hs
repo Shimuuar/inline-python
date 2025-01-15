@@ -5,9 +5,13 @@ module Python.Inline.Types
     Py
   , runPy
   , pyIO
+    -- * Python objects
   , PyObject
   , unsafeWithPyObject
+    -- * Python exceptions
   , PyError(..)
+  , PyException(..)
+  , PyInternalError(..)
   ) where
 
 import Python.Internal.Types

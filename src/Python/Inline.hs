@@ -45,6 +45,8 @@ module Python.Inline
   , runPy
   , runPyInMain
   , PyObject
+  , PyError(..)
+  , PyException(..)
     -- * Conversion between haskell and python
     -- $conversion
   , toPy
@@ -53,6 +55,8 @@ module Python.Inline
   , fromPy'
   , ToPy
   , FromPy
+    -- * Troubleshooting
+    -- $troubleshooting
   ) where
 
 import Python.Inline.Literal
@@ -94,3 +98,22 @@ import Python.Internal.Eval
 -- any of dunder methods. For that reason conversion from python to
 -- haskell must happen in 'Py' monad. Conversion also always performs
 -- full copy. Conversion from haskell to python is stateful as well.
+
+
+-- $troubleshooting
+--
+-- Here's list of common problems and solutions and workarounds.
+--
+-- 1. __@inline-python@ cannot find libraries__
+--
+-- @inline-python@ may look for modules in wrong place. Set
+-- environment variables @PYTHONHOME@ or @PYTHONPATH@ to point it
+-- right way.
+--
+--
+-- 2. __Linker error in GHCi__
+--
+-- Attempting to import library using C extensions from ghci may
+-- result in linker failing to find symbols from @libpython@ like
+-- @PyFloat_Type@ or some other. Only known workaround is to set
+-- @LD_PRELOAD=/path/to/libpython3.XX.so@ environment variable.

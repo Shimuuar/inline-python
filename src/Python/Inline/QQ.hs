@@ -3,6 +3,32 @@
 -- Quasiquoters for embedding python expression into haskell programs.
 -- Python is statement oriented and heavily relies on mutable state.
 -- This means we need several different quasiquoters.
+--
+--
+-- == Syntax in quasiquotes
+--
+-- Note on syntax. Python's grammar is indentation sensitive and
+-- quasiquote is passed to 'QuasiQuoter' without any adjustment. So
+-- this seemingly reasonable code:
+--
+-- > foo = [py_| do_this()
+-- >             do_that()
+-- >           |]
+--
+-- results in following source code.
+--
+-- >  do_this()
+-- >             do_that()
+--
+-- There's no sensible way to adjust indentation, since we don't know
+-- original indentation of first line of quasiquote in haskell's code.
+-- Thus rule: __First line of multiline quasiquote must be empty__.
+-- This is correct way to write code:
+--
+-- > foo = [py_|
+-- >         do_this()
+-- >         do_that()
+-- >         |]
 module Python.Inline.QQ
   ( pymain
   , py_
@@ -15,11 +41,11 @@ import Language.Haskell.TH.Quote
 import Python.Internal.EvalQQ
 
 
--- | Evaluate python code in context of main module. All variables
---   defined in this block will remain visible. This quasiquote
---   doesn't return any python value.
+-- | Evaluate sequence of python statements. It works in the same way
+--   as python's @exec@. All module imports and all variables defined
+--   in this quasiquote will be visible to later quotes.
 --
---   This quote creates object of type @Py ()@
+--   It creates value of type @Py ()@
 pymain :: QuasiQuoter
 pymain = QuasiQuoter
   { quoteExp  = \txt -> [| evaluatorPymain $(expQQ Exec txt) |]
@@ -28,11 +54,11 @@ pymain = QuasiQuoter
   , quoteDec  = error "quoteDec"
   }
 
--- | Evaluate python code in context of main module. All variables
---   defined in this block will be discarded. This quasiquote doesn't
---   return any python value.
+-- | Evaluate sequence of python statements. All module imports and
+--   all variables defined in this quasiquote will be discarded and
+--   won't be visible in later quotes.
 --
---   This quote creates object of type @Py ()@
+--   It creates value of type @Py ()@
 py_ :: QuasiQuoter
 py_ = QuasiQuoter
   { quoteExp  = \txt -> [| evaluatorPy_ $(expQQ Exec txt) |]
