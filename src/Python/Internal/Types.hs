@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeFamilies      #-}
 -- |
 -- Definition of data types used by inline-python. They are moved to
 -- separate module since some are required for @inline-c@'s context
@@ -26,10 +27,11 @@ module Python.Internal.Types
 
 import Control.Monad.IO.Class
 import Control.Monad.Catch
+import Control.Monad.Primitive (PrimMonad(..),RealWorld)
 import Control.Exception
 import Data.Coerce
 import Data.Int
-import Data.Map.Strict           qualified as Map
+import Data.Map.Strict             qualified as Map
 import Foreign.Ptr
 import Foreign.C.Types
 import GHC.ForeignPtr
@@ -105,6 +107,11 @@ pyIO = Py
 -- | Removes exception masking
 instance MonadIO Py where
   liftIO = Py . interruptible
+
+instance PrimMonad Py where
+  type PrimState Py = RealWorld
+  primitive = Py . primitive
+  {-# INLINE primitive #-}
 
 
 ----------------------------------------------------------------

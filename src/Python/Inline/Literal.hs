@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                      #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE QuasiQuotes              #-}
 {-# LANGUAGE TemplateHaskell          #-}
@@ -19,8 +20,17 @@ import Data.Bits
 import Data.Char
 import Data.Int
 import Data.Word
-import Data.Set                  qualified as Set
-import Data.Map.Strict           qualified as Map
+import Data.Set                    qualified as Set
+import Data.Map.Strict             qualified as Map
+import Data.Vector.Generic         qualified as VG
+import Data.Vector.Generic.Mutable qualified as MVG
+import Data.Vector                 qualified as V
+#if MIN_VERSION_vector(0,13,2)
+import Data.Vector.Strict          qualified as VV
+#endif
+import Data.Vector.Storable        qualified as VS
+import Data.Vector.Primitive       qualified as VP
+import Data.Vector.Unboxed         qualified as VU
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Storable
@@ -436,6 +446,43 @@ instance (FromPy k, FromPy v, Ord k) => FromPy (Map.Map k v) where
                   pure $! Map.insert k v m)
       Map.empty
 
+-- | Converts to python's list
+instance ToPy a => ToPy (V.Vector a) where
+  basicToPy = vectorToPy
+-- | Converts to python's list
+instance (ToPy a, VS.Storable a) => ToPy (VS.Vector a) where
+  basicToPy = vectorToPy
+-- | Converts to python's list
+instance (ToPy a, VP.Prim a) => ToPy (VP.Vector a) where
+  basicToPy = vectorToPy
+-- | Converts to python's list
+instance (ToPy a, VU.Unbox a) => ToPy (VU.Vector a) where
+  basicToPy = vectorToPy
+#if MIN_VERSION_vector(0,13,2)
+-- | Converts to python's list
+instance (ToPy a) => ToPy (VV.Vector a) where
+  basicToPy = vectorToPy
+#endif
+
+-- | Accepts python's sequence (@len@ and indexing)
+instance FromPy a => FromPy (V.Vector a) where
+  basicFromPy = vectorFromPy
+-- | Accepts python's sequence (@len@ and indexing)
+instance (FromPy a, VS.Storable a) => FromPy (VS.Vector a) where
+  basicFromPy = vectorFromPy
+-- | Accepts python's sequence (@len@ and indexing)
+instance (FromPy a, VP.Prim a) => FromPy (VP.Vector a) where
+  basicFromPy = vectorFromPy
+-- | Accepts python's sequence (@len@ and indexing)
+instance (FromPy a, VU.Unbox a) => FromPy (VU.Vector a) where
+  basicFromPy = vectorFromPy
+#if MIN_VERSION_vector(0,13,2)
+-- | Accepts python's sequence (@len@ and indexing)
+instance FromPy a => FromPy (VV.Vector a) where
+  basicFromPy = vectorFromPy
+#endif
+
+
 -- | Fold over iterable. Function takes ownership over iterator.
 foldPyIterable
   :: Ptr PyObject                -- ^ Python iterator (not checked)
@@ -449,6 +496,39 @@ foldPyIterable p_iter step a0
       NULL -> a <$ checkThrowPyError
       p    -> loop =<< (step a p `finally` decref p)
 
+
+vectorFromPy :: (VG.Vector v a, FromPy a) => Ptr PyObject -> Py (v a)
+{-# INLINE vectorFromPy #-}
+vectorFromPy p_seq = do
+  len <- Py [CU.exp| long long { PySequence_Size($(PyObject* p_seq)) } |]
+  when (len < 0) $ do
+    Py [C.exp| void { PyErr_Clear() } |]
+    throwM BadPyType
+  -- Read data into vector
+  buf <- MVG.generateM (fromIntegral len) $ \i -> do
+    let i_c = fromIntegral i
+    Py [CU.exp| PyObject* { PySequence_GetItem($(PyObject* p_seq), $(long long i_c)) } |] >>= \case
+      NULL -> mustThrowPyError
+      p    -> basicFromPy p `finally` decref p
+  VG.unsafeFreeze buf
+
+vectorToPy :: (VG.Vector v a, ToPy a) => v a -> Py (Ptr PyObject)
+vectorToPy vec = runProgram $ do
+  p_list <- takeOwnership =<< checkNull (Py [CU.exp| PyObject* { PyList_New($(long long n_c)) } |])
+  progPy $ do
+    let loop i
+          | i >= n    = p_list <$ incref p_list
+          | otherwise = basicToPy (VG.unsafeIndex vec i) >>= \case
+              NULL -> pure nullPtr
+              p_a  -> do
+                let i_c = fromIntegral i :: CLLong
+                -- NOTE: PyList_SET_ITEM steals reference
+                Py [CU.exp| void { PyList_SET_ITEM($(PyObject* p_list), $(long long i_c), $(PyObject* p_a)) } |]
+                loop (i+1)
+    loop 0
+  where
+    n   = VG.length vec
+    n_c = fromIntegral n :: CLLong
 
 ----------------------------------------------------------------
 -- Functions marshalling

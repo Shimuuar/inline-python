@@ -59,6 +59,7 @@ Library
                    , text             >=2
                    , bytestring
                    , exceptions       >=0.10
+                   , vector           >=0.13
   hs-source-dirs:    src
   include-dirs:      include
   c-sources:         cbits/python.c
@@ -85,11 +86,13 @@ library test
     QuasiQuotes
   build-depends:    base
                   , inline-python
-                  , tasty            >=1.2
-                  , tasty-hunit      >=0.10
-                  , tasty-quickcheck >=0.10
+                  , tasty                >=1.2
+                  , tasty-hunit          >=0.10
+                  , tasty-quickcheck     >=0.10
+                  , quickcheck-instances >=0.3.32
                   , exceptions
                   , containers
+                  , vector
   hs-source-dirs:   test
   Exposed-modules:
     TST.Run

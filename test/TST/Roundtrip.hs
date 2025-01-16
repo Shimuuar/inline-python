@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE CPP                 #-}
 -- |
 module TST.Roundtrip (tests) where
 
@@ -11,8 +12,18 @@ import Foreign.C.Types
 
 import Test.Tasty
 import Test.Tasty.QuickCheck
+import Test.QuickCheck.Instances.Vector ()
 import Python.Inline
 import Python.Inline.QQ
+
+import Data.Vector                 qualified as V
+#if MIN_VERSION_vector(0,13,2)
+import Data.Vector.Strict          qualified as VV
+#endif
+import Data.Vector.Storable        qualified as VS
+import Data.Vector.Primitive       qualified as VP
+import Data.Vector.Unboxed         qualified as VU
+
 
 tests :: TestTree
 tests = testGroup "Roundtrip"
@@ -56,6 +67,13 @@ tests = testGroup "Roundtrip"
     , testRoundtrip @(Set Int)
     , testRoundtrip @(Map Int Int)
     -- , testRoundtrip @String -- Trips on zero byte as it should
+    , testRoundtrip @(V.Vector Int)
+    , testRoundtrip @(VS.Vector Int)
+    , testRoundtrip @(VP.Vector Int)
+    , testRoundtrip @(VU.Vector Int)
+#if MIN_VERSION_vector(0,13,2)
+--    , testRoundtrip @(VV.Vector Int)
+#endif
     ]
   , testGroup "OutOfRange"
     [ testOutOfRange @Int8   @Int16
@@ -66,7 +84,7 @@ tests = testGroup "Roundtrip"
     , testOutOfRange @Word32 @Word64
     ]
   ]
-  
+
 testRoundtrip
   :: forall a. (FromPy a, ToPy a, Eq a, Arbitrary a, Show a, Typeable a) => TestTree
 testRoundtrip = testProperty (show (typeOf (undefined :: a))) (propRoundtrip @a)
@@ -98,4 +116,3 @@ propOutOfRange wide = ioProperty $ do
     a_hs = case fromIntegral wide :: a of
       a' | fromIntegral a' == wide -> Just a'
          | otherwise               -> Nothing
-
