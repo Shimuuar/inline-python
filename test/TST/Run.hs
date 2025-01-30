@@ -19,7 +19,12 @@ tests = testGroup "Run python"
       import threading
       assert threading.main_thread() == threading.current_thread()
       |]
-  , testCase "Python exceptions are converted" $ runPy $ throwsPy [py_| 1 / 0 |]
+  , testCase "Python exceptions are converted (py)"   $ runPy      $ throwsPy    [py_| 1 / 0 |]
+  , testCase "Python exceptions are converted (std)"  $ throwsPyIO $ runPy       [py_| 1 / 0 |]
+  , testCase "Python exceptions are converted (main)" $ throwsPyIO $ runPyInMain [py_| 1 / 0 |]
+  , testCase "Main doesn't deadlock after exception"  $ do
+      throwsPyIO $ runPyInMain [py_| 1 / 0 |]
+      runPyInMain [py_| assert True |]
   , testCase "Scope pymain->any" $ runPy $ do
       [pymain|
              x = 12
