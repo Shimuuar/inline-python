@@ -474,11 +474,12 @@ runPyInMain py
       RunningN _ eval tid_main _ -> do
         acquireLock tid_main
         pure
-          $ flip finally     (atomically (releaseLock tid_main))
-          $ flip onException (throwTo tid_main InterruptMain)
-          $ do resp <- newEmptyMVar
-               putMVar eval $ EvalReq py resp
-               either throwM pure =<< takeMVar resp
+          $ flip finally (atomically (releaseLock tid_main))
+          $ do r <- flip onException (throwTo tid_main InterruptMain)
+                  $ do resp <- newEmptyMVar
+                       putMVar eval $ EvalReq py resp
+                       takeMVar resp
+               either throwM pure r
   -- Single-threaded RTS
   | otherwise = runPy py
 
