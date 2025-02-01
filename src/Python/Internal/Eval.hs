@@ -15,7 +15,7 @@ module Python.Internal.Eval
     -- * Evaluator
   , runPy
   , runPyInMain
-  , unPy
+  , unsafeRunPy
     -- * GC-related
   , newPyObject
     -- * C-API wrappers
@@ -451,7 +451,7 @@ runPy py
   where
     -- We check whether interpreter is initialized. Throw exception if
     -- it wasn't. Better than segfault isn't it?
-    go = ensurePyLock $ unPy (ensureGIL py)
+    go = ensurePyLock $ unsafeRunPy (ensureGIL py)
 
 -- | Same as 'runPy' but will make sure that code is run in python's
 --   main thread. It's thread in which python's interpreter was
@@ -486,8 +486,8 @@ runPyInMain py
 
 -- | Execute python action. This function is unsafe and should be only
 --   called in thread of interpreter.
-unPy :: Py a -> IO a
-unPy (Py io) = io
+unsafeRunPy :: Py a -> IO a
+unsafeRunPy (Py io) = io
 
 
 
