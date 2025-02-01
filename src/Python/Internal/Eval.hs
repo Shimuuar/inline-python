@@ -461,7 +461,11 @@ runPyInMain :: Py a -> IO a
 -- See NOTE: [Python and threading]
 runPyInMain py
   -- Multithreaded RTS
-  | rtsSupportsBoundThreads = join $ atomically $ readTVar globalPyState >>= \case
+  | rtsSupportsBoundThreads = bracket acquireMain releaseMain evalMain
+  -- Single-threaded RTS
+  | otherwise = runPy py
+  where
+    acquireMain = atomically $ readTVar globalPyState >>= \case
       NotInitialized   -> throwSTM PythonNotInitialized
       InitFailed       -> throwSTM PyInitializationFailed
       Finalized        -> throwSTM PythonIsFinalized
@@ -470,15 +474,15 @@ runPyInMain py
       Running1         -> throwSTM $ PyInternalError "runPyInMain: Running1"
       RunningN _ eval tid_main _ -> do
         acquireLock tid_main
-        pure
-          $ flip finally (atomically (releaseLock tid_main))
-          $ do r <- flip onException (throwTo tid_main InterruptMain)
-                  $ do resp <- newEmptyMVar
-                       putMVar eval $ EvalReq py resp
-                       takeMVar resp
-               either throwM pure r
-  -- Single-threaded RTS
-  | otherwise = runPy py
+        pure (tid_main, eval)
+    --
+    releaseMain (tid_main, _   ) = atomically (releaseLock tid_main)
+    evalMain    (tid_main, eval) = do
+      r <- mask_ $ do resp <- newEmptyMVar
+                      putMVar eval $ EvalReq py resp
+                      takeMVar resp `onException` throwTo tid_main InterruptMain
+      either throwM pure r
+
 
 -- | Execute python action. This function is unsafe and should be only
 --   called in thread of interpreter.
