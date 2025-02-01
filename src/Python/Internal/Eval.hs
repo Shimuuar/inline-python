@@ -274,8 +274,8 @@ releaseLock tid = readTVar globalPyLock >>= \case
 initializePython :: IO ()
 -- See NOTE: [Python and threading]
 initializePython = [CU.exp| int { Py_IsInitialized() } |] >>= \case
-  0 | rtsSupportsBoundThreads -> runInBoundThread $ mask_ $ doInializePython
-    | otherwise               -> mask_ $ doInializePython
+  0 | rtsSupportsBoundThreads -> runInBoundThread $ doInializePython
+    | otherwise               -> doInializePython
   _ -> pure ()
 
 -- | Destroy python interpreter.
