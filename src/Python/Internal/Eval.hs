@@ -330,7 +330,6 @@ doInializePython = do
         let fini st = atomically $ do
               writeTVar globalPyState $ st
               writeTVar globalPyLock  $ LockUnlocked
-
         pure $
           (mask_ $ if
             -- On multithreaded runtime create bound thread to make
@@ -448,7 +447,7 @@ runPy py
   where
     -- We check whether interpreter is initialized. Throw exception if
     -- it wasn't. Better than segfault isn't it?
-    go = ensurePyLock $ unsafeRunPy (ensureGIL py)
+    go = ensurePyLock $ mask_ $ unsafeRunPy (ensureGIL py)
 
 -- | Same as 'runPy' but will make sure that code is run in python's
 --   main thread. It's thread in which python's interpreter was
