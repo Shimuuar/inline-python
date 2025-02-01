@@ -41,6 +41,7 @@ import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
 import Data.Maybe
+import Data.Function
 import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -335,22 +336,18 @@ mainThread lock_init lock_eval = do
   putMVar lock_init r_init
   case r_init of
     False -> pure ()
-    True  -> mask_ $ do
-      let loop
-            = handle (\InterruptMain -> pure ())
-            $ takeMVar lock_eval >>= \case
-                EvalReq py resp -> do
-                  res <- (Right <$> runPy py) `catch` (pure . Left)
-                  putMVar resp res
-                  loop
-                StopReq resp -> do
-                  [C.block| void {
-                    PyGILState_Ensure();
-                    Py_Finalize();
-                    } |]
-                  putMVar resp ()
-      loop
-
+    True  -> mask_ $ fix $ \loop ->
+      takeMVar lock_eval >>= \case
+        EvalReq py resp -> do
+          res <- (Right <$> runPy py) `catch` (pure . Left)
+          putMVar resp res
+          loop
+        StopReq resp -> do
+          [C.block| void {
+            PyGILState_Ensure();
+            Py_Finalize();
+            } |]
+          putMVar resp ()
 
 
 doInializePythonIO :: IO Bool
