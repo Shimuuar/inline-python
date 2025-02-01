@@ -280,7 +280,33 @@ initializePython = [CU.exp| int { Py_IsInitialized() } |] >>= \case
 
 -- | Destroy python interpreter.
 finalizePython :: IO ()
-finalizePython = mask_ doFinalizePython
+finalizePython = join $ atomically $ readTVar globalPyState >>= \case
+  NotInitialized   -> throwSTM PythonNotInitialized
+  InitFailed       -> throwSTM PythonIsFinalized
+  Finalized        -> pure $ pure ()
+  InInitialization -> retry
+  InFinalization   -> retry
+  -- We can simply call Py_Finalize
+  Running1 -> checkLock $ [C.block| void {
+    PyGILState_Ensure();
+    Py_Finalize();
+    } |]
+  -- We need to call Py_Finalize on main thread
+  RunningN _ eval _ tid_gc -> checkLock $ do
+    killThread tid_gc
+    resp <- newEmptyMVar
+    putMVar eval $ StopReq resp
+    takeMVar resp
+  where
+    checkLock action = readTVar globalPyLock >>= \case
+      LockUninialized -> throwSTM $ PyInternalError "finalizePython LockUninialized"
+      LockFinalized   -> throwSTM $ PyInternalError "finalizePython LockFinalized"
+      Locked{}        -> retry
+      LockedByGC      -> retry
+      LockUnlocked    -> do
+        writeTVar globalPyLock  LockFinalized
+        writeTVar globalPyState Finalized
+        pure action
 
 -- | Bracket which ensures that action is executed with properly
 --   initialized interpreter
@@ -397,35 +423,6 @@ doInializePythonIO = do
       return 1;
       } |]
   return $! r == 0
-
-doFinalizePython :: IO ()
-doFinalizePython = join $ atomically $ readTVar globalPyState >>= \case
-  NotInitialized   -> throwSTM PythonNotInitialized
-  InitFailed       -> throwSTM PythonIsFinalized
-  Finalized        -> pure $ pure ()
-  InInitialization -> retry
-  InFinalization   -> retry
-  -- We can simply call Py_Finalize
-  Running1 -> checkLock $ [C.block| void {
-    PyGILState_Ensure();
-    Py_Finalize();
-    } |]
-  -- We need to call Py_Finalize on main thread
-  RunningN _ eval _ tid_gc -> checkLock $ do
-    killThread tid_gc
-    resp <- newEmptyMVar
-    putMVar eval $ StopReq resp
-    takeMVar resp
-  where
-    checkLock action = readTVar globalPyLock >>= \case
-      LockUninialized -> throwSTM $ PyInternalError "doFinalizePython LockUninialized"
-      LockFinalized   -> throwSTM $ PyInternalError "doFinalizePython LockFinalized"
-      Locked{}        -> retry
-      LockedByGC      -> retry
-      LockUnlocked    -> do
-        writeTVar globalPyLock  LockFinalized
-        writeTVar globalPyState Finalized
-        pure action
 
 
 ----------------------------------------------------------------
