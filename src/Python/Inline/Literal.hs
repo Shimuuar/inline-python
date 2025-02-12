@@ -577,7 +577,6 @@ instance (ToPy b) => ToPy (IO b) where
     --
     [CU.exp| PyObject* { inline_py_callback_METH_NOARGS($(PyCFunction f_ptr)) } |]
 
-
 -- | Only accepts positional parameters
 instance (FromPy a, Show a, ToPy b) => ToPy (a -> IO b) where
   basicToPy f = Py $ do
@@ -599,6 +598,40 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> IO b) where
       progPy $ basicToPy =<< dropGIL (f a1 a2)
     --
     [CU.exp| PyObject* { inline_py_callback_METH_FASTCALL($(PyCFunctionFast f_ptr)) } |]
+
+
+-- | Converted to 0-ary function
+instance (ToPy b) => ToPy (Py b) where
+  basicToPy f = Py $ do
+    --
+    f_ptr <- wrapCFunction $ \_ _ -> pyCallback $ do
+      progPy $ basicToPy =<< f
+    --
+    [CU.exp| PyObject* { inline_py_callback_METH_NOARGS($(PyCFunction f_ptr)) } |]
+
+-- | Only accepts positional parameters
+instance (FromPy a, Show a, ToPy b) => ToPy (a -> Py b) where
+  basicToPy f = Py $ do
+    --
+    f_ptr <- wrapCFunction $ \_ p_a -> pyCallback $ do
+      a <- loadArg p_a 0 1
+      progPy $ basicToPy =<< f a
+    --
+    [CU.exp| PyObject* { inline_py_callback_METH_O($(PyCFunction f_ptr)) } |]
+
+-- | Only accepts positional parameters
+instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> Py b) where
+  basicToPy f = Py $ do
+    --
+    f_ptr <- wrapFastcall $ \_ p_arr n -> pyCallback $ do
+      when (n /= 2) $ abortM $ raiseBadNArgs 2 n
+      a1 <- loadArgFastcall p_arr 0 n
+      a2 <- loadArgFastcall p_arr 1 n
+      progPy $ basicToPy =<< f a1 a2
+    --
+    [CU.exp| PyObject* { inline_py_callback_METH_FASTCALL($(PyCFunctionFast f_ptr)) } |]
+
+
 
 ----------------------------------------------------------------
 -- Helpers
