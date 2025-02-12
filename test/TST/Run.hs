@@ -2,6 +2,8 @@
 -- Tests for variable scope and names
 module TST.Run(tests) where
 
+import Control.Concurrent
+import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Test.Tasty
@@ -19,7 +21,24 @@ tests = testGroup "Run python"
       import threading
       assert threading.main_thread() == threading.current_thread()
       |]
-  , testCase "Python exceptions are converted" $ runPy $ throwsPy [py_| 1 / 0 |]
+  , testCase "Python exceptions are converted (py)"   $ runPy      $ throwsPy    [py_| 1 / 0 |]
+  , testCase "Python exceptions are converted (std)"  $ throwsPyIO $ runPy       [py_| 1 / 0 |]
+  , testCase "Python exceptions are converted (main)" $ throwsPyIO $ runPyInMain [py_| 1 / 0 |]
+  , testCase "Main doesn't deadlock after exception"  $ do
+      throwsPyIO $ runPyInMain [py_| 1 / 0 |]
+      runPyInMain [py_| assert True |]
+    -- Here we test that exceptions are really passed to python's thread without running python
+  , testCase "Exception in runPyInMain works" $ do
+      lock <- newEmptyMVar
+      tid  <- myThreadId
+      _    <- forkIO $ takeMVar lock >> throwTo tid Stop
+      handle (\Stop -> pure ())
+        $ runPyInMain
+        $ do liftIO $ putMVar lock ()
+             liftIO $ threadDelay 10_000_000
+             error "Should be interrupted"
+      runPyInMain $ pure ()
+  --
   , testCase "Scope pymain->any" $ runPy $ do
       [pymain|
              x = 12
@@ -112,3 +131,7 @@ tests = testGroup "Run python"
             pass
         |]
   ]
+
+data Stop = Stop
+  deriving stock    Show
+  deriving anyclass Exception

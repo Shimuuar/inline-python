@@ -12,3 +12,7 @@ throwsPy :: Py () -> Py ()
 throwsPy io = (io >> liftIO (assertFailure "Evaluation should raise python exception"))
   `catch` (\(_::PyError) -> pure ())
 
+throwsPyIO :: IO () -> IO ()
+throwsPyIO io = (io >> assertFailure "Evaluation should raise python exception")
+  `catch` (\(_::PyError) -> pure ())
+
