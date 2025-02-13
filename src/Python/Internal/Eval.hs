@@ -457,23 +457,46 @@ runPyInMain :: Py a -> IO a
 -- See NOTE: [Python and threading]
 runPyInMain py
   -- Multithreaded RTS
-  | rtsSupportsBoundThreads = bracket acquireMain releaseMain evalMain
+  | rtsSupportsBoundThreads = do
+      tid <- myThreadId
+      bracket (acquireMain tid) fst snd
   -- Single-threaded RTS
   | otherwise = runPy py
   where
-    acquireMain = atomically $ readTVar globalPyState >>= \case
+    acquireMain tid = atomically $ readTVar globalPyState >>= \case
       NotInitialized   -> throwSTM PythonNotInitialized
       InitFailed       -> throwSTM PyInitializationFailed
       Finalized        -> throwSTM PythonIsFinalized
       InInitialization -> retry
       InFinalization   -> retry
       Running1         -> throwSTM $ PyInternalError "runPyInMain: Running1"
-      RunningN _ eval tid_main _ -> do
-        acquireLock tid_main
-        pure (tid_main, eval)
+      RunningN _ eval tid_main _ -> readTVar globalPyLock >>= \case
+        LockUninialized -> throwSTM PythonNotInitialized
+        LockFinalized   -> throwSTM PythonIsFinalized
+        LockedByGC      -> retry
+        -- We need to send closure to main python thread when we're grabbing lock.
+        LockUnlocked    -> do
+          writeTVar globalPyLock $ Locked tid_main []
+          pure ( atomically (releaseLock tid_main)
+               , evalInOtherThread tid_main eval
+               )
+        -- If we can grab lock and main thread taken lock we're
+        -- already executing on main thread. We can simply execute code
+        Locked t ts
+          | t /= tid
+            -> retry
+          | t == tid_main || (tid_main `elem` ts) -> do
+              writeTVar globalPyLock $ Locked t (t : ts)
+              pure ( atomically (releaseLock t)
+                   , unsafeRunPy $ ensureGIL py
+                   )
+          | otherwise -> do
+              writeTVar globalPyLock $ Locked tid_main (t : ts)
+              pure ( atomically (releaseLock tid_main)
+                   , evalInOtherThread tid_main eval
+                   )
     --
-    releaseMain (tid_main, _   ) = atomically (releaseLock tid_main)
-    evalMain    (tid_main, eval) = do
+    evalInOtherThread tid_main eval = do
       r <- mask_ $ do resp <- newEmptyMVar
                       putMVar eval $ EvalReq py resp
                       takeMVar resp `onException` throwTo tid_main InterruptMain
