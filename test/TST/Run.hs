@@ -17,6 +17,7 @@ tests = testGroup "Run python"
   [ testCase "Empty QQ" $ runPy [py_| |]
   , testCase "Second init is noop" $ initializePython
   , testCase "Nested runPy" $ runPy $ liftIO $ runPy $ pure ()
+  , testCase "Nested runPyInMain" $ runPyInMain $ liftIO $ runPyInMain $ pure ()
   , testCase "runPyInMain" $ runPyInMain $ [py_|
       import threading
       assert threading.main_thread() == threading.current_thread()

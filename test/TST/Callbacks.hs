@@ -69,44 +69,59 @@ tests = testGroup "Callbacks"
        let foo :: Int -> IO Int
            foo y = pure $ 10 `div` y
        throwsPy [py_| foo_hs(0) |]
-   , testCase "Haskell exception in callback(arity=2)" $ runPy $ do
-       let foo :: Int -> Int -> IO Int
-           foo x y = pure $ x `div` y
-       throwsPy [py_| foo_hs(1, 0) |]
-     ----------------------------------------
-   , testCase "Call python in callback (arity=1)" $ runPy $ do
-       let foo :: Int -> IO Int
-           foo x = do Just x' <- runPy $ fromPy =<< [pye| 100 // x_hs |]
-                      pure x'
-       [py_|
-         assert foo_hs(5) == 20
-         |]
-   , testCase "Call python in callback (arity=2" $ runPy $ do
-       let foo :: Int -> Int -> IO Int
-           foo x y = do Just x' <- runPy $ fromPy =<< [pye| x_hs // y_hs |]
-                        pure x'
-       [py_|
-         assert foo_hs(100,5) == 20
-         |]
-     ----------------------------------------
-   , testCase "No leaks (arity=1)" $ runPy $ do
-       let foo :: Int -> IO Int
-           foo y = pure $ 10 * y
-       [py_|
-         import sys
-         x = 123456
-         old_refcount = sys.getrefcount(x)
-         foo_hs(x)
-         assert old_refcount == sys.getrefcount(x)
-         |]
-   , testCase "No leaks (arity=2)" $ runPy $ do
-       let foo :: Int -> Int -> IO Int
-           foo x y = pure $ x * y
-       [py_|
-         import sys
-         x = 123456
-         old_refcount = sys.getrefcount(x)
-         foo_hs(1,x)
-         assert old_refcount == sys.getrefcount(x)
-         |]
-   ]
+  , testCase "Haskell exception in callback(arity=2)" $ runPy $ do
+      let foo :: Int -> Int -> IO Int
+          foo x y = pure $ x `div` y
+      throwsPy [py_| foo_hs(1, 0) |]
+    ----------------------------------------
+  , testCase "Call python in callback (arity=1)" $ runPy $ do
+      let foo :: Int -> IO Int
+          foo x = do Just x' <- runPy $ fromPy =<< [pye| 100 // x_hs |]
+                     pure x'
+      [py_|
+        assert foo_hs(5) == 20
+        |]
+  , testCase "Call python in callback (arity=2" $ runPy $ do
+      let foo :: Int -> Int -> IO Int
+          foo x y = do Just x' <- runPy $ fromPy =<< [pye| x_hs // y_hs |]
+                       pure x'
+      [py_|
+        assert foo_hs(100,5) == 20
+        |]
+    ----------------------------------------
+  , testCase "runPyInMain in runPyInMain (arity=1)" $ do
+      let foo :: Int -> IO Int
+          foo x = do Just x' <- runPyInMain $ fromPy =<< [pye| 100 // x_hs |]
+                     pure x'
+      runPyInMain [py_|
+        assert foo_hs(5) == 20
+        |]
+  , testCase "runPyInMain in runPy (arity=1)" $ do
+      let foo :: Int -> IO Int
+          foo x = do Just x' <- runPyInMain $ fromPy =<< [pye| 100 // x_hs |]
+                     pure x'
+      runPy [py_|
+        assert foo_hs(5) == 20
+        |]
+    ----------------------------------------
+  , testCase "No leaks (arity=1)" $ runPy $ do
+      let foo :: Int -> IO Int
+          foo y = pure $ 10 * y
+      [py_|
+        import sys
+        x = 123456
+        old_refcount = sys.getrefcount(x)
+        foo_hs(x)
+        assert old_refcount == sys.getrefcount(x)
+        |]
+  , testCase "No leaks (arity=2)" $ runPy $ do
+      let foo :: Int -> Int -> IO Int
+          foo x y = pure $ x * y
+      [py_|
+        import sys
+        x = 123456
+        old_refcount = sys.getrefcount(x)
+        foo_hs(1,x)
+        assert old_refcount == sys.getrefcount(x)
+        |]
+  ]
