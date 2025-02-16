@@ -1,3 +1,7 @@
+NEXT VERSION []
+------------------
+* Crash of python's main thread when one attempts to interrupt it fixed.
+
 0.1.1 [2025.02.13]
 ------------------
 * Number of deadlocks in `runPyInMain` fixed:

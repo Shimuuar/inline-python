@@ -362,7 +362,7 @@ mainThread lock_init lock_eval = do
   case r_init of
     False -> pure ()
     True  -> mask_ $ fix $ \loop ->
-      takeMVar lock_eval >>= \case
+      (takeMVar lock_eval `catch` (\InterruptMain -> pure HereWeGoAgain)) >>= \case
         EvalReq py resp -> do
           res <- (Right <$> runPy py) `catch` (pure . Left)
           putMVar resp res
@@ -373,6 +373,7 @@ mainThread lock_init lock_eval = do
             Py_Finalize();
             } |]
           putMVar resp ()
+        HereWeGoAgain -> loop
 
 
 doInializePythonIO :: IO Bool
@@ -431,6 +432,7 @@ doInializePythonIO = do
 data EvalReq
   = forall a. EvalReq (Py a) (MVar (Either SomeException a))
   | StopReq (MVar ())
+  | HereWeGoAgain
 
 data InterruptMain = InterruptMain
   deriving stock    Show
