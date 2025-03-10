@@ -1,5 +1,5 @@
-NEXT VERSION []
-------------------
+0.1.1.1 [2025.03.10]
+--------------------
 * Crash of python's main thread when one attempts to interrupt it fixed.
 
 0.1.1 [2025.02.13]
