@@ -488,7 +488,7 @@ instance FromPy a => FromPy (VV.Vector a) where
 #endif
 
 
--- | Fold over iterable. Function takes ownership over iterator.
+-- | Fold over python's iterator. Function takes ownership over iterator.
 foldPyIterable
   :: Ptr PyObject                -- ^ Python iterator (not checked)
   -> (a -> Ptr PyObject -> Py a) -- ^ Step function. It takes borrowed pointer.
