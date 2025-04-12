@@ -20,6 +20,9 @@ import Data.Bits
 import Data.Char
 import Data.Int
 import Data.Word
+import Data.ByteString             qualified as BS
+import Data.ByteString.Unsafe      qualified as BS
+import Data.ByteString.Lazy        qualified as BL
 import Data.Set                    qualified as Set
 import Data.Map.Strict             qualified as Map
 import Data.Vector.Generic         qualified as VG
@@ -34,6 +37,8 @@ import Data.Vector.Unboxed         qualified as VU
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Storable
+import Foreign.Marshal.Alloc     (mallocBytes)
+import Foreign.Marshal.Utils     (copyBytes)
 import GHC.Float                 (float2Double, double2Float)
 
 import Language.C.Inline         qualified as C
@@ -529,6 +534,45 @@ vectorToPy vec = runProgram $ do
   where
     n   = VG.length vec
     n_c = fromIntegral n :: CLLong
+
+
+-- | @since 0.1.2@. Converted to @bytes@
+instance ToPy BS.ByteString where
+  basicToPy bs = pyIO $ BS.unsafeUseAsCStringLen bs $ \(ptr,len) -> do
+    let c_len = fromIntegral len :: CLLong
+    py <- [CU.exp| PyObject* { PyBytes_FromStringAndSize($(char* ptr), $(long long c_len)) }|]
+    case py of
+      NULL -> unsafeRunPy mustThrowPyError
+      _    -> return py
+
+-- | @since 0.1.2@. Accepts @bytes@ and @bytearray@
+instance FromPy BS.ByteString where
+  basicFromPy py = pyIO $ do
+    [CU.exp| int { PyBytes_Check($(PyObject* py)) } |] >>= \case
+      TRUE -> do
+        sz  <- [CU.exp| int64_t { PyBytes_GET_SIZE( $(PyObject* py)) } |]
+        buf <- [CU.exp| char*   { PyBytes_AS_STRING($(PyObject* py)) } |]
+        fini buf (fromIntegral sz)
+      _ -> [CU.exp| int { PyByteArray_Check($(PyObject* py)) } |] >>= \case
+        TRUE -> do
+          sz  <- [CU.exp| int64_t { PyByteArray_GET_SIZE( $(PyObject* py)) } |]
+          buf <- [CU.exp| char*   { PyByteArray_AS_STRING($(PyObject* py)) } |]
+          fini buf (fromIntegral sz)
+        _ -> throwM BadPyType
+    where
+      fini py_buf sz = do
+        hs_buf <- mallocBytes sz
+        copyBytes hs_buf py_buf sz
+        BS.unsafePackMallocCStringLen (hs_buf, sz)
+
+-- | @since 0.1.2@. Converted to @bytes@
+instance ToPy BL.ByteString where
+  basicToPy = basicToPy . BL.toStrict
+
+-- | @since 0.1.2@. Accepts @bytes@ and @bytearray@
+instance FromPy BL.ByteString where
+  basicFromPy = fmap BL.fromStrict . basicFromPy
+
 
 ----------------------------------------------------------------
 -- Functions marshalling

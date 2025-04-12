@@ -1,8 +1,10 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- |
 module TST.ToPy (tests) where
 
-import Data.Set qualified as Set
-import Data.Map.Strict qualified as Map
+import Data.ByteString      qualified as BS
+import Data.Set             qualified as Set
+import Data.Map.Strict      qualified as Map
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
@@ -16,8 +18,13 @@ tests = testGroup "ToPy"
   , testCase "Double"         $ runPy $ let i = 1234.25 :: Double in [py_| assert i_hs == 1234.25 |]
   , testCase "Char ASCII"     $ runPy $ let c = 'a'    in [py_| assert c_hs == 'a' |]
   , testCase "Char unicode"   $ runPy $ let c = 'ы'    in [py_| assert c_hs == 'ы' |]
-  , testCase "String ASCII"   $ runPy $ let c = "asdf" in [py_| assert c_hs == 'asdf' |]
-  , testCase "String unicode" $ runPy $ let c = "фыва" in [py_| assert c_hs == 'фыва' |]
+  , testCase "String ASCII"   $ runPy $ let c = "asdf"::String in [py_| assert c_hs == 'asdf' |]
+  , testCase "String unicode" $ runPy $ let c = "фыва"::String in [py_| assert c_hs == 'фыва' |]
+    -- Byte objects
+  , testCase "empty ByteString" $ runPy $
+      let bs = BS.empty in [py_| assert bs_hs == b'' |]
+  , testCase "0 ByteString" $ runPy $
+      let bs = BS.pack [0] in [py_| assert bs_hs == b'\x00' |]
     -- Container types
   , testCase "Tuple2" $ runPy $
       let x = (1::Int, 333::Int)

@@ -1,7 +1,9 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE OverloadedStrings   #-}
 -- |
 module TST.FromPy (tests) where
 
+import Data.ByteString qualified as BS
 import Control.Monad.IO.Class
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -30,6 +32,12 @@ tests = testGroup "FromPy"
   , testGroup "String"
     [ testCase "asdf" $ eq @String (Just "asdf") [pye| "asdf" |]
     , testCase "фыва" $ eq @String (Just "фыва") [pye| "фыва" |]
+    ]
+  , testGroup "ByteString"
+    [ testCase "empty" $ eq @BS.ByteString (Just "") [pye| b'' |]
+    , testCase "x00"   $ eq @BS.ByteString (Just $ BS.pack [0]) [pye| b'\x00' |]
+    , testCase "empty arr" $ eq @BS.ByteString (Just "") [pye| bytearray(b'') |]
+    , testCase "x00 arr"   $ eq @BS.ByteString (Just $ BS.pack [0]) [pye| bytearray(b'\x00') |]
     ]
   , testGroup "Bool"
     [ testCase "True->Bool"  $ eq @Bool (Just True)  [pye| True  |]
