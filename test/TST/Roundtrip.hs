@@ -8,12 +8,15 @@ import Data.Word
 import Data.Typeable
 import Data.Set        (Set)
 import Data.Map.Strict (Map)
+import Data.Text       qualified as T
+import Data.Text.Lazy  qualified as TL
 import Foreign.C.Types
 
 import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.QuickCheck.Instances.Vector ()
 import Test.QuickCheck.Instances.ByteString ()
+import Test.QuickCheck.Instances.Text ()
 import Python.Inline
 import Python.Inline.QQ
 
@@ -78,7 +81,9 @@ tests = testGroup "Roundtrip"
 --    , testRoundtrip @(VV.Vector Int)
 #endif
     , testRoundtrip @BS.ByteString
-    -- , testRoundtrip @BL.ByteString
+    , testRoundtrip @BL.ByteString
+    , testRoundtrip @T.Text
+    , testRoundtrip @TL.Text
     ]
   , testGroup "OutOfRange"
     [ testOutOfRange @Int8   @Int16

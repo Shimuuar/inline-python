@@ -1,5 +1,6 @@
 {-# LANGUAGE CPP                      #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE MagicHash                #-}
 {-# LANGUAGE QuasiQuotes              #-}
 {-# LANGUAGE TemplateHaskell          #-}
 -- |
@@ -25,6 +26,9 @@ import Data.ByteString.Unsafe      qualified as BS
 import Data.ByteString.Lazy        qualified as BL
 import Data.Set                    qualified as Set
 import Data.Map.Strict             qualified as Map
+import Data.Text                   qualified as T
+import Data.Text.Encoding          qualified as T
+import Data.Text.Lazy              qualified as TL
 import Data.Vector.Generic         qualified as VG
 import Data.Vector.Generic.Mutable qualified as MVG
 import Data.Vector                 qualified as V
@@ -37,7 +41,7 @@ import Data.Vector.Unboxed         qualified as VU
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Storable
-import Foreign.Marshal.Alloc     (mallocBytes)
+import Foreign.Marshal.Alloc     (alloca,mallocBytes)
 import Foreign.Marshal.Utils     (copyBytes)
 import GHC.Float                 (float2Double, double2Float)
 
@@ -572,6 +576,36 @@ instance ToPy BL.ByteString where
 -- | @since 0.1.2@. Accepts @bytes@ and @bytearray@
 instance FromPy BL.ByteString where
   basicFromPy = fmap BL.fromStrict . basicFromPy
+
+
+instance ToPy T.Text where
+  -- NOTE: Is there ore efficient way to access
+  basicToPy str = pyIO $ BS.unsafeUseAsCStringLen bs $ \(ptr,len) -> do
+    let c_len = fromIntegral len :: CLLong
+    py <- [CU.exp| PyObject* { PyUnicode_FromStringAndSize($(char* ptr), $(long long c_len)) } |]
+    case py of
+      NULL -> unsafeRunPy mustThrowPyError
+      _    -> pure py
+    where
+      bs = T.encodeUtf8 str
+
+instance ToPy TL.Text where
+  basicToPy = basicToPy . TL.toStrict
+
+
+instance FromPy T.Text where
+  basicFromPy py = pyIO $ do
+    [CU.exp| int { PyUnicode_Check($(PyObject* py)) } |] >>= \case
+      TRUE -> alloca $ \p_size -> do
+        buf <- [CU.exp| const char* { PyUnicode_AsUTF8AndSize($(PyObject* py), $(long* p_size)) } |]
+        sz  <- peek p_size
+        bs  <- BS.unsafePackCStringLen (buf, fromIntegral sz)
+        return $! T.decodeUtf8Lenient bs
+      _ -> throwM BadPyType
+
+instance FromPy TL.Text where
+  basicFromPy = fmap TL.fromStrict . basicFromPy
+
 
 
 ----------------------------------------------------------------
