@@ -1,5 +1,6 @@
 {-# LANGUAGE CPP                      #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE MagicHash                #-}
 {-# LANGUAGE QuasiQuotes              #-}
 {-# LANGUAGE TemplateHaskell          #-}
 -- |
@@ -13,6 +14,7 @@ module Python.Inline.Literal
   , fromPy'
   ) where
 
+import Control.Exception           (evaluate)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.Trans.Cont
@@ -20,8 +22,15 @@ import Data.Bits
 import Data.Char
 import Data.Int
 import Data.Word
+import Data.ByteString             qualified as BS
+import Data.ByteString.Unsafe      qualified as BS
+import Data.ByteString.Short       qualified as SBS
+import Data.ByteString.Lazy        qualified as BL
 import Data.Set                    qualified as Set
 import Data.Map.Strict             qualified as Map
+import Data.Text                   qualified as T
+import Data.Text.Encoding          qualified as T
+import Data.Text.Lazy              qualified as TL
 import Data.Vector.Generic         qualified as VG
 import Data.Vector.Generic.Mutable qualified as MVG
 import Data.Vector                 qualified as V
@@ -34,6 +43,8 @@ import Data.Vector.Unboxed         qualified as VU
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Storable
+import Foreign.Marshal.Alloc     (alloca,mallocBytes)
+import Foreign.Marshal.Utils     (copyBytes)
 import GHC.Float                 (float2Double, double2Float)
 
 import Language.C.Inline         qualified as C
@@ -483,7 +494,7 @@ instance FromPy a => FromPy (VV.Vector a) where
 #endif
 
 
--- | Fold over iterable. Function takes ownership over iterator.
+-- | Fold over python's iterator. Function takes ownership over iterator.
 foldPyIterable
   :: Ptr PyObject                -- ^ Python iterator (not checked)
   -> (a -> Ptr PyObject -> Py a) -- ^ Step function. It takes borrowed pointer.
@@ -529,6 +540,107 @@ vectorToPy vec = runProgram $ do
   where
     n   = VG.length vec
     n_c = fromIntegral n :: CLLong
+
+
+-- | @since NEXT_VERSION@. Converted to @bytes@
+instance ToPy BS.ByteString where
+  basicToPy bs = pyIO $ BS.unsafeUseAsCStringLen bs $ \(ptr,len) -> do
+    let c_len = fromIntegral len :: CLLong
+    py <- [CU.exp| PyObject* { PyBytes_FromStringAndSize($(char* ptr), $(long long c_len)) }|]
+    case py of
+      NULL -> unsafeRunPy mustThrowPyError
+      _    -> return py
+
+-- | @since NEXT_VERSION@. Accepts @bytes@ and @bytearray@
+instance FromPy BS.ByteString where
+  basicFromPy py = pyIO $ do
+    [CU.exp| int { PyBytes_Check($(PyObject* py)) } |] >>= \case
+      TRUE -> do
+        sz  <- [CU.exp| int64_t { PyBytes_GET_SIZE( $(PyObject* py)) } |]
+        buf <- [CU.exp| char*   { PyBytes_AS_STRING($(PyObject* py)) } |]
+        fini buf (fromIntegral sz)
+      _ -> [CU.exp| int { PyByteArray_Check($(PyObject* py)) } |] >>= \case
+        TRUE -> do
+          sz  <- [CU.exp| int64_t { PyByteArray_GET_SIZE( $(PyObject* py)) } |]
+          buf <- [CU.exp| char*   { PyByteArray_AS_STRING($(PyObject* py)) } |]
+          fini buf (fromIntegral sz)
+        _ -> throwM BadPyType
+    where
+      fini py_buf sz = do
+        hs_buf <- mallocBytes sz
+        copyBytes hs_buf py_buf sz
+        BS.unsafePackMallocCStringLen (hs_buf, sz)
+
+-- | @since NEXT_VERSION@. Converted to @bytes@
+instance ToPy BL.ByteString where
+  basicToPy = basicToPy . BL.toStrict
+
+-- | @since NEXT_VERSION@. Accepts @bytes@ and @bytearray@
+instance FromPy BL.ByteString where
+  basicFromPy = fmap BL.fromStrict . basicFromPy
+
+
+-- | @since NEXT_VERSION@. Accepts @bytes@ and @bytearray@
+instance FromPy SBS.ShortByteString where
+  basicFromPy py = pyIO $ do
+    [CU.exp| int { PyBytes_Check($(PyObject* py)) } |] >>= \case
+      TRUE -> do
+        sz  <- [CU.exp| int64_t { PyBytes_GET_SIZE( $(PyObject* py)) } |]
+        buf <- [CU.exp| char*   { PyBytes_AS_STRING($(PyObject* py)) } |]
+        fini buf (fromIntegral sz)
+      _ -> [CU.exp| int { PyByteArray_Check($(PyObject* py)) } |] >>= \case
+        TRUE -> do
+          sz  <- [CU.exp| int64_t { PyByteArray_GET_SIZE( $(PyObject* py)) } |]
+          buf <- [CU.exp| char*   { PyByteArray_AS_STRING($(PyObject* py)) } |]
+          fini buf (fromIntegral sz)
+        _ -> throwM BadPyType
+    where
+      fini buf sz = do
+        bs <- BS.unsafePackCStringLen (buf, sz)
+        evaluate $ SBS.toShort bs
+
+-- | @since NEXT_VERSION@. Converted to @bytes@
+instance ToPy SBS.ShortByteString where
+  basicToPy bs = pyIO $ SBS.useAsCStringLen bs $ \(ptr,len) -> do
+    let c_len = fromIntegral len :: CLLong
+    py <- [CU.exp| PyObject* { PyBytes_FromStringAndSize($(char* ptr), $(long long c_len)) }|]
+    case py of
+      NULL -> unsafeRunPy mustThrowPyError
+      _    -> return py
+
+
+-- | @since NEXT_VERSION@.
+instance ToPy T.Text where
+  -- NOTE: Is there ore efficient way to access
+  basicToPy str = pyIO $ BS.unsafeUseAsCStringLen bs $ \(ptr,len) -> do
+    let c_len = fromIntegral len :: CLLong
+    py <- [CU.exp| PyObject* { PyUnicode_FromStringAndSize($(char* ptr), $(long long c_len)) } |]
+    case py of
+      NULL -> unsafeRunPy mustThrowPyError
+      _    -> pure py
+    where
+      bs = T.encodeUtf8 str
+
+-- | @since NEXT_VERSION@.
+instance ToPy TL.Text where
+  basicToPy = basicToPy . TL.toStrict
+
+-- | @since NEXT_VERSION@.
+instance FromPy T.Text where
+  basicFromPy py = pyIO $ do
+    [CU.exp| int { PyUnicode_Check($(PyObject* py)) } |] >>= \case
+      TRUE -> alloca $ \p_size -> do
+        buf <- [CU.exp| const char* { PyUnicode_AsUTF8AndSize($(PyObject* py), $(long* p_size)) } |]
+        sz  <- peek p_size
+        bs  <- BS.unsafePackCStringLen (buf, fromIntegral sz)
+        return $! T.decodeUtf8Lenient bs
+      _ -> throwM BadPyType
+
+-- | @since NEXT_VERSION@.
+instance FromPy TL.Text where
+  basicFromPy = fmap TL.fromStrict . basicFromPy
+
+
 
 ----------------------------------------------------------------
 -- Functions marshalling

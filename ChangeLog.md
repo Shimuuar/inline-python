@@ -1,3 +1,7 @@
+NEXT_VERSION [..]
+----------------
+* `FromPy`/`ToPy` instances for text and bytestrings data types.
+
 0.1.1.1 [2025.03.10]
 --------------------
 * Crash of python's main thread when one attempts to interrupt it fixed.

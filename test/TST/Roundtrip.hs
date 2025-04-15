@@ -8,14 +8,21 @@ import Data.Word
 import Data.Typeable
 import Data.Set        (Set)
 import Data.Map.Strict (Map)
+import Data.Text       qualified as T
+import Data.Text.Lazy  qualified as TL
 import Foreign.C.Types
 
 import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.QuickCheck.Instances.Vector ()
+import Test.QuickCheck.Instances.ByteString ()
+import Test.QuickCheck.Instances.Text ()
 import Python.Inline
 import Python.Inline.QQ
 
+import Data.ByteString             qualified as BS
+import Data.ByteString.Lazy        qualified as BL
+import Data.ByteString.Short       qualified as SBS
 import Data.Vector                 qualified as V
 #if MIN_VERSION_vector(0,13,2)
 import Data.Vector.Strict          qualified as VV
@@ -74,6 +81,11 @@ tests = testGroup "Roundtrip"
 #if MIN_VERSION_vector(0,13,2)
 --    , testRoundtrip @(VV.Vector Int)
 #endif
+    , testRoundtrip @BS.ByteString
+    , testRoundtrip @BL.ByteString
+    , testRoundtrip @SBS.ShortByteString
+    , testRoundtrip @T.Text
+    , testRoundtrip @TL.Text
     ]
   , testGroup "OutOfRange"
     [ testOutOfRange @Int8   @Int16

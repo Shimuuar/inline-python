@@ -93,6 +93,8 @@ library test
                   , exceptions
                   , containers
                   , vector
+                  , bytestring
+                  , text
   hs-source-dirs:   test
   Exposed-modules:
     TST.Run

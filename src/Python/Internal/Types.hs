@@ -23,6 +23,8 @@ module Python.Internal.Types
   , pattern IPY_ERR_COMPILE
   , pattern IPY_ERR_PYTHON
   , pattern NULL
+  , pattern FALSE
+  , pattern TRUE
   ) where
 
 import Control.Monad.IO.Class
@@ -148,3 +150,9 @@ pattern IPY_ERR_COMPILE = 2
 pattern NULL :: Ptr a
 pattern NULL <- ((== nullPtr) -> True) where
   NULL = nullPtr
+
+pattern FALSE :: CInt
+pattern FALSE = 0
+
+pattern TRUE :: CInt
+pattern TRUE <- ((/= 0) -> True)
