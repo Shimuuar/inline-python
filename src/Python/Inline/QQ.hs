@@ -48,7 +48,7 @@ import Python.Internal.EvalQQ
 --   It creates value of type @Py ()@
 pymain :: QuasiQuoter
 pymain = QuasiQuoter
-  { quoteExp  = \txt -> [| evaluatorPymain $(expQQ Exec txt) |]
+  { quoteExp  = \txt -> [| uncurry evaluatorPymain $(expQQ Exec txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -61,7 +61,7 @@ pymain = QuasiQuoter
 --   It creates value of type @Py ()@
 py_ :: QuasiQuoter
 py_ = QuasiQuoter
-  { quoteExp  = \txt -> [| evaluatorPy_ $(expQQ Exec txt) |]
+  { quoteExp  = \txt -> [| uncurry evaluatorPy_ $(expQQ Exec txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -73,7 +73,7 @@ py_ = QuasiQuoter
 --   This quote creates object of type @Py PyObject@
 pye :: QuasiQuoter
 pye = QuasiQuoter
-  { quoteExp  = \txt -> [| evaluatorPye $(expQQ Eval txt) |]
+  { quoteExp  = \txt -> [| uncurry evaluatorPye $(expQQ Eval txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -85,7 +85,7 @@ pye = QuasiQuoter
 --   call return
 pyf :: QuasiQuoter
 pyf = QuasiQuoter
-  { quoteExp  = \txt -> [| evaluatorPyf $(expQQ Fun txt) |]
+  { quoteExp  = \txt -> [| uncurry evaluatorPyf $(expQQ Fun txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"

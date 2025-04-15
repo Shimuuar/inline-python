@@ -8,6 +8,7 @@ module Python.Internal.EvalQQ
   , evaluatorPye
   , evaluatorPyf
   , Code(..)
+  , DictBinder(..)
     -- * Code generation
   , expQQ
   , Mode(..)
@@ -51,6 +52,42 @@ newtype Code = Code BS.ByteString
 unsafeWithCode :: Code -> Program r (Ptr CChar)
 unsafeWithCode (Code bs) = Program $ ContT $ \fun ->
   Py (BS.unsafeUseAsCString bs $ unsafeRunPy . fun)
+
+
+newtype PyVarName = PyVarName BS.ByteString
+  deriving stock (Show, TH.Lift)
+
+varName :: String -> PyVarName
+varName = PyVarName . T.encodeUtf8 . T.pack
+
+unsafeWithPyVarName :: PyVarName -> Program r (Ptr CChar)
+unsafeWithPyVarName (PyVarName bs) = Program $ ContT $ \fun ->
+  Py (BS.unsafeUseAsCString bs $ unsafeRunPy . fun)
+
+
+
+newtype DictBinder = DictBinder { bind :: Ptr PyObject -> Py () }
+
+instance Semigroup DictBinder where
+  f <> g = DictBinder $ \p -> f.bind p >> g.bind p
+instance Monoid DictBinder where
+  mempty = DictBinder $ \_ -> pure ()
+
+
+bindVar :: ToPy a => PyVarName -> a -> DictBinder
+bindVar var a = DictBinder $ \p_dict -> runProgram $ do
+  p_key <- unsafeWithPyVarName var
+  p_obj <- takeOwnership =<< progPy (throwOnNULL =<< basicToPy a)
+  progPy $ do
+    r <- Py [C.block| int {
+      PyObject* p_obj = $(PyObject* p_obj);
+      return PyDict_SetItemString($(PyObject* p_dict), $(char* p_key), p_obj);
+      } |]
+    case r of
+      0 -> pure ()
+      _ -> mustThrowPyError
+
+
 
 ----------------------------------------------------------------
 -- Evaluators
@@ -105,52 +142,43 @@ pyEvalExpr p_globals p_locals src = runProgram $ do
   progPy $ newPyObject p_res
 
 
-evaluatorPymain :: (Ptr PyObject -> Py Code) -> Py ()
-evaluatorPymain getSource = do
+evaluatorPymain :: Code -> DictBinder -> Py ()
+evaluatorPymain code binder = do
   p_main <- basicMainDict
-  src    <- getSource p_main
-  pyExecExpr p_main p_main src
+  binder.bind p_main
+  pyExecExpr p_main p_main code
 
-evaluatorPy_ :: (Ptr PyObject -> Py Code) -> Py ()
-evaluatorPy_ getSource = runProgram $ do
+evaluatorPy_ :: Code -> DictBinder -> Py ()
+evaluatorPy_ code binder = runProgram $ do
   p_globals <- progPy basicMainDict
   p_locals  <- takeOwnership =<< progPy basicNewDict
-  progPy $ pyExecExpr p_globals p_locals =<< getSource p_locals
+  progPy $ do
+    binder.bind p_locals
+    pyExecExpr p_globals p_locals code
 
-evaluatorPye :: (Ptr PyObject -> Py Code) -> Py PyObject
-evaluatorPye getSource = runProgram $ do
+evaluatorPye :: Code -> DictBinder -> Py PyObject
+evaluatorPye code binder = runProgram $ do
   p_globals <- progPy basicMainDict
   p_locals  <- takeOwnership =<< progPy basicNewDict
-  progPy $ pyEvalExpr p_globals p_locals =<< getSource p_locals
+  progPy $ do
+    binder.bind p_locals
+    pyEvalExpr p_globals p_locals code
 
-evaluatorPyf :: (Ptr PyObject -> Py Code) -> Py PyObject
-evaluatorPyf getSource = runProgram $ do
+evaluatorPyf :: Code -> DictBinder -> Py PyObject
+evaluatorPyf code binder = runProgram $ do
   p_globals <- progPy basicMainDict
   p_locals  <- takeOwnership =<< progPy basicNewDict
   p_kwargs  <- takeOwnership =<< progPy basicNewDict
   progPy $ do
     -- Create function in p_locals
-    pyExecExpr p_globals p_locals =<< getSource p_kwargs
+    pyExecExpr p_globals p_locals code
     -- Look up function
+    binder.bind p_kwargs
     p_fun <- getFunctionObject p_locals >>= \case
       NULL -> throwM $ PyInternalError "_inline_python_ must be present"
       p    -> pure p
     -- Call python function we just constructed
     newPyObject =<< throwOnNULL =<< basicCallKwdOnly p_fun p_kwargs
-
-
-basicBindInDict :: ToPy a => String -> a -> Ptr PyObject -> Py ()
-basicBindInDict name a p_dict = runProgram $ do
-  p_key <- withPyCString name
-  p_obj <- takeOwnership =<< progPy (throwOnNULL =<< basicToPy a)
-  progPy $ do
-    r <- Py [C.block| int {
-      PyObject* p_obj = $(PyObject* p_obj);
-      return PyDict_SetItemString($(PyObject* p_dict), $(char* p_key), p_obj);
-      } |]
-    case r of
-      0 -> pure ()
-      _ -> mustThrowPyError
 
 -- | Return dict of @__main__@ module
 basicMainDict :: Py (Ptr PyObject)
@@ -213,14 +241,14 @@ expQQ mode qq_src = do
     case code of
       ExitSuccess   -> pure $ words stdout
       ExitFailure{} -> fail stderr
-  let args = [ [| basicBindInDict $(TH.lift nm) $(TH.dyn (chop nm)) |]
+  let args = [ [| bindVar $(TH.lift (varName nm)) $(TH.dyn (chop nm)) |]
              | nm <- antis
              ]
       src_eval = prepareForEval mode antis src
   --
-  [| \p_dict -> do
-        mapM_ ($ p_dict) $(TH.listE args)
-        pure $(TH.lift $ Code $ T.encodeUtf8 $ T.pack src_eval)
+  [| ( $(TH.lift $ Code $ T.encodeUtf8 $ T.pack src_eval)
+     , mconcat $(TH.listE args)
+     )
    |]
 
 
