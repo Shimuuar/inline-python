@@ -540,7 +540,7 @@ vectorToPy vec = runProgram $ do
     n_c = fromIntegral n :: CLLong
 
 
--- | @since 0.1.2@. Converted to @bytes@
+-- | @since NEXT_VERSION@. Converted to @bytes@
 instance ToPy BS.ByteString where
   basicToPy bs = pyIO $ BS.unsafeUseAsCStringLen bs $ \(ptr,len) -> do
     let c_len = fromIntegral len :: CLLong
@@ -549,7 +549,7 @@ instance ToPy BS.ByteString where
       NULL -> unsafeRunPy mustThrowPyError
       _    -> return py
 
--- | @since 0.1.2@. Accepts @bytes@ and @bytearray@
+-- | @since NEXT_VERSION@. Accepts @bytes@ and @bytearray@
 instance FromPy BS.ByteString where
   basicFromPy py = pyIO $ do
     [CU.exp| int { PyBytes_Check($(PyObject* py)) } |] >>= \case
@@ -569,15 +569,15 @@ instance FromPy BS.ByteString where
         copyBytes hs_buf py_buf sz
         BS.unsafePackMallocCStringLen (hs_buf, sz)
 
--- | @since 0.1.2@. Converted to @bytes@
+-- | @since NEXT_VERSION@. Converted to @bytes@
 instance ToPy BL.ByteString where
   basicToPy = basicToPy . BL.toStrict
 
--- | @since 0.1.2@. Accepts @bytes@ and @bytearray@
+-- | @since NEXT_VERSION@. Accepts @bytes@ and @bytearray@
 instance FromPy BL.ByteString where
   basicFromPy = fmap BL.fromStrict . basicFromPy
 
-
+-- | @since NEXT_VERSION@.
 instance ToPy T.Text where
   -- NOTE: Is there ore efficient way to access
   basicToPy str = pyIO $ BS.unsafeUseAsCStringLen bs $ \(ptr,len) -> do
@@ -589,10 +589,11 @@ instance ToPy T.Text where
     where
       bs = T.encodeUtf8 str
 
+-- | @since NEXT_VERSION@.
 instance ToPy TL.Text where
   basicToPy = basicToPy . TL.toStrict
 
-
+-- | @since NEXT_VERSION@.
 instance FromPy T.Text where
   basicFromPy py = pyIO $ do
     [CU.exp| int { PyUnicode_Check($(PyObject* py)) } |] >>= \case
@@ -603,6 +604,7 @@ instance FromPy T.Text where
         return $! T.decodeUtf8Lenient bs
       _ -> throwM BadPyType
 
+-- | @since NEXT_VERSION@.
 instance FromPy TL.Text where
   basicFromPy = fmap TL.fromStrict . basicFromPy
 
