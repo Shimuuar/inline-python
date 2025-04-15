@@ -14,6 +14,7 @@ module Python.Inline.Literal
   , fromPy'
   ) where
 
+import Control.Exception           (evaluate)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.Trans.Cont
@@ -23,6 +24,7 @@ import Data.Int
 import Data.Word
 import Data.ByteString             qualified as BS
 import Data.ByteString.Unsafe      qualified as BS
+import Data.ByteString.Short       qualified as SBS
 import Data.ByteString.Lazy        qualified as BL
 import Data.Set                    qualified as Set
 import Data.Map.Strict             qualified as Map
@@ -576,6 +578,36 @@ instance ToPy BL.ByteString where
 -- | @since NEXT_VERSION@. Accepts @bytes@ and @bytearray@
 instance FromPy BL.ByteString where
   basicFromPy = fmap BL.fromStrict . basicFromPy
+
+
+-- | @since NEXT_VERSION@. Accepts @bytes@ and @bytearray@
+instance FromPy SBS.ShortByteString where
+  basicFromPy py = pyIO $ do
+    [CU.exp| int { PyBytes_Check($(PyObject* py)) } |] >>= \case
+      TRUE -> do
+        sz  <- [CU.exp| int64_t { PyBytes_GET_SIZE( $(PyObject* py)) } |]
+        buf <- [CU.exp| char*   { PyBytes_AS_STRING($(PyObject* py)) } |]
+        fini buf (fromIntegral sz)
+      _ -> [CU.exp| int { PyByteArray_Check($(PyObject* py)) } |] >>= \case
+        TRUE -> do
+          sz  <- [CU.exp| int64_t { PyByteArray_GET_SIZE( $(PyObject* py)) } |]
+          buf <- [CU.exp| char*   { PyByteArray_AS_STRING($(PyObject* py)) } |]
+          fini buf (fromIntegral sz)
+        _ -> throwM BadPyType
+    where
+      fini buf sz = do
+        bs <- BS.unsafePackCStringLen (buf, sz)
+        evaluate $ SBS.toShort bs
+
+-- | @since NEXT_VERSION@. Converted to @bytes@
+instance ToPy SBS.ShortByteString where
+  basicToPy bs = pyIO $ SBS.useAsCStringLen bs $ \(ptr,len) -> do
+    let c_len = fromIntegral len :: CLLong
+    py <- [CU.exp| PyObject* { PyBytes_FromStringAndSize($(char* ptr), $(long long c_len)) }|]
+    case py of
+      NULL -> unsafeRunPy mustThrowPyError
+      _    -> return py
+
 
 -- | @since NEXT_VERSION@.
 instance ToPy T.Text where

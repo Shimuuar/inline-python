@@ -22,6 +22,7 @@ import Python.Inline.QQ
 
 import Data.ByteString             qualified as BS
 import Data.ByteString.Lazy        qualified as BL
+import Data.ByteString.Short       qualified as SBS
 import Data.Vector                 qualified as V
 #if MIN_VERSION_vector(0,13,2)
 import Data.Vector.Strict          qualified as VV
@@ -82,6 +83,7 @@ tests = testGroup "Roundtrip"
 #endif
     , testRoundtrip @BS.ByteString
     , testRoundtrip @BL.ByteString
+    , testRoundtrip @SBS.ShortByteString
     , testRoundtrip @T.Text
     , testRoundtrip @TL.Text
     ]
