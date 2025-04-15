@@ -57,7 +57,7 @@ Library
                    , stm              >=2.4
                    , template-haskell -any
                    , text             >=2
-                   , bytestring
+                   , bytestring       >=0.11.2
                    , exceptions       >=0.10
                    , vector           >=0.13
   hs-source-dirs:    src

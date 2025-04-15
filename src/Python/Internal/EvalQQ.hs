@@ -7,6 +7,7 @@ module Python.Internal.EvalQQ
   , evaluatorPy_
   , evaluatorPye
   , evaluatorPyf
+  , Code(..)
     -- * Code generation
   , expQQ
   , Mode(..)
@@ -14,10 +15,12 @@ module Python.Internal.EvalQQ
 
 import Control.Monad.IO.Class
 import Control.Monad.Catch
+import Control.Monad.Trans.Cont (ContT(..))
 import Data.Bits
 import Data.Char
 import Data.List                 (intercalate)
 import Data.ByteString           qualified as BS
+import Data.ByteString.Unsafe    qualified as BS
 import Data.Text                 qualified as T
 import Data.Text.Encoding        qualified as T
 import Foreign.C.Types
@@ -42,6 +45,13 @@ C.context (C.baseCtx <> pyCtx)
 C.include "<inline-python.h>"
 ----------------------------------------------------------------
 
+newtype Code = Code BS.ByteString
+  deriving stock (Show, TH.Lift)
+
+unsafeWithCode :: Code -> Program r (Ptr CChar)
+unsafeWithCode (Code bs) = Program $ ContT $ \fun ->
+  Py (BS.unsafeUseAsCString bs $ unsafeRunPy . fun)
+
 ----------------------------------------------------------------
 -- Evaluators
 ----------------------------------------------------------------
@@ -51,12 +61,11 @@ C.include "<inline-python.h>"
 pyExecExpr
   :: Ptr PyObject -- ^ Globals
   -> Ptr PyObject -- ^ Locals
-  -> String       -- ^ Python source code
+  -> Code         -- ^ Python source code
   -> Py ()
 pyExecExpr p_globals p_locals src = runProgram $ do
-  p_py <- withPyCString src
-  progPy $ do
-    Py [C.block| void {
+  p_py <- unsafeWithCode src
+  progIO [C.block| void {
       PyObject* globals = $(PyObject* p_globals);
       PyObject* locals  = $(PyObject* p_locals);
       // Compile code
@@ -69,18 +78,17 @@ pyExecExpr p_globals p_locals src = runProgram $ do
       Py_XDECREF(res);
       Py_DECREF(code);
       } |]
-    checkThrowPyError
+  progPy checkThrowPyError
 
 -- | Evaluate expression with fresh local environment
 pyEvalExpr
   :: Ptr PyObject -- ^ Globals
   -> Ptr PyObject -- ^ Locals
-  -> String       -- ^ Python source code
+  -> Code         -- ^ Python source code
   -> Py PyObject
 pyEvalExpr p_globals p_locals src = runProgram $ do
-  p_py  <- withPyCString src
-  progPy $ do
-    p_res <- Py [C.block| PyObject* {
+  p_py  <- unsafeWithCode src
+  p_res <- progIO [C.block| PyObject* {
       PyObject* globals = $(PyObject* p_globals);
       PyObject* locals  = $(PyObject* p_locals);
       // Compile code
@@ -93,29 +101,29 @@ pyEvalExpr p_globals p_locals src = runProgram $ do
       Py_DECREF(code);
       return r;
       }|]
-    checkThrowPyError
-    newPyObject p_res
+  progPy $ checkThrowPyError
+  progPy $ newPyObject p_res
 
 
-evaluatorPymain :: (Ptr PyObject -> Py String) -> Py ()
+evaluatorPymain :: (Ptr PyObject -> Py Code) -> Py ()
 evaluatorPymain getSource = do
   p_main <- basicMainDict
   src    <- getSource p_main
   pyExecExpr p_main p_main src
 
-evaluatorPy_ :: (Ptr PyObject -> Py String) -> Py ()
+evaluatorPy_ :: (Ptr PyObject -> Py Code) -> Py ()
 evaluatorPy_ getSource = runProgram $ do
   p_globals <- progPy basicMainDict
   p_locals  <- takeOwnership =<< progPy basicNewDict
   progPy $ pyExecExpr p_globals p_locals =<< getSource p_locals
 
-evaluatorPye :: (Ptr PyObject -> Py String) -> Py PyObject
+evaluatorPye :: (Ptr PyObject -> Py Code) -> Py PyObject
 evaluatorPye getSource = runProgram $ do
   p_globals <- progPy basicMainDict
   p_locals  <- takeOwnership =<< progPy basicNewDict
   progPy $ pyEvalExpr p_globals p_locals =<< getSource p_locals
 
-evaluatorPyf :: (Ptr PyObject -> Py String) -> Py PyObject
+evaluatorPyf :: (Ptr PyObject -> Py Code) -> Py PyObject
 evaluatorPyf getSource = runProgram $ do
   p_globals <- progPy basicMainDict
   p_locals  <- takeOwnership =<< progPy basicNewDict
@@ -212,7 +220,7 @@ expQQ mode qq_src = do
   --
   [| \p_dict -> do
         mapM_ ($ p_dict) $(TH.listE args)
-        pure $(TH.lift src_eval)
+        pure $(TH.lift $ Code $ T.encodeUtf8 $ T.pack src_eval)
    |]
 
 
