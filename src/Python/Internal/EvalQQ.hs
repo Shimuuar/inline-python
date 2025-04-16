@@ -7,8 +7,11 @@ module Python.Internal.EvalQQ
   , evaluatorPy_
   , evaluatorPye
   , evaluatorPyf
-  , Code(..)
-  , DictBinder(..)
+  , Code
+  , codeFromText
+  , codeFromString
+  , DictBinder
+  , PyQuote(..)
     -- * Code generation
   , expQQ
   , Mode(..)
@@ -46,14 +49,34 @@ C.context (C.baseCtx <> pyCtx)
 C.include "<inline-python.h>"
 ----------------------------------------------------------------
 
+data PyQuote = PyQuote
+  { code   :: !Code
+  , binder :: !DictBinder
+  } 
+
+
+-- | UTF-8 encoded python source code. Usually it's produced by
+--   Template Haskell's 'TH.lift' function.
 newtype Code = Code BS.ByteString
   deriving stock (Show, TH.Lift)
+
+-- | Create properly encoded @Code@. This function doesn't check
+--   syntactic validity.
+codeFromText :: T.Text -> Code
+codeFromText = Code . T.encodeUtf8
+
+-- | Create properly encoded @Code@. This function doesn't check
+--   syntactic validity.
+codeFromString :: String -> Code
+codeFromString = codeFromText . T.pack
 
 unsafeWithCode :: Code -> Program r (Ptr CChar)
 unsafeWithCode (Code bs) = Program $ ContT $ \fun ->
   Py (BS.unsafeUseAsCString bs $ unsafeRunPy . fun)
 
 
+-- | Python's variable name encoded using UTF-8. It exists in order to
+--   avoid working with @String@ at runtime.
 newtype PyVarName = PyVarName BS.ByteString
   deriving stock (Show, TH.Lift)
 
@@ -65,7 +88,7 @@ unsafeWithPyVarName (PyVarName bs) = Program $ ContT $ \fun ->
   Py (BS.unsafeUseAsCString bs $ unsafeRunPy . fun)
 
 
-
+-- | Closure which stores values in provided dictionary
 newtype DictBinder = DictBinder { bind :: Ptr PyObject -> Py () }
 
 instance Semigroup DictBinder where
@@ -79,7 +102,7 @@ bindVar var a = DictBinder $ \p_dict -> runProgram $ do
   p_key <- unsafeWithPyVarName var
   p_obj <- takeOwnership =<< progPy (throwOnNULL =<< basicToPy a)
   progPy $ do
-    r <- Py [C.block| int {
+    r <- Py [CU.block| int {
       PyObject* p_obj = $(PyObject* p_obj);
       return PyDict_SetItemString($(PyObject* p_dict), $(char* p_key), p_obj);
       } |]
@@ -142,30 +165,30 @@ pyEvalExpr p_globals p_locals src = runProgram $ do
   progPy $ newPyObject p_res
 
 
-evaluatorPymain :: Code -> DictBinder -> Py ()
-evaluatorPymain code binder = do
+evaluatorPymain :: PyQuote -> Py ()
+evaluatorPymain (PyQuote code binder) = do
   p_main <- basicMainDict
   binder.bind p_main
   pyExecExpr p_main p_main code
 
-evaluatorPy_ :: Code -> DictBinder -> Py ()
-evaluatorPy_ code binder = runProgram $ do
+evaluatorPy_ :: PyQuote -> Py ()
+evaluatorPy_ (PyQuote code binder) = runProgram $ do
   p_globals <- progPy basicMainDict
   p_locals  <- takeOwnership =<< progPy basicNewDict
   progPy $ do
     binder.bind p_locals
     pyExecExpr p_globals p_locals code
 
-evaluatorPye :: Code -> DictBinder -> Py PyObject
-evaluatorPye code binder = runProgram $ do
+evaluatorPye :: PyQuote -> Py PyObject
+evaluatorPye (PyQuote code binder) = runProgram $ do
   p_globals <- progPy basicMainDict
   p_locals  <- takeOwnership =<< progPy basicNewDict
   progPy $ do
     binder.bind p_locals
     pyEvalExpr p_globals p_locals code
 
-evaluatorPyf :: Code -> DictBinder -> Py PyObject
-evaluatorPyf code binder = runProgram $ do
+evaluatorPyf :: PyQuote -> Py PyObject
+evaluatorPyf (PyQuote code binder) = runProgram $ do
   p_globals <- progPy basicMainDict
   p_locals  <- takeOwnership =<< progPy basicNewDict
   p_kwargs  <- takeOwnership =<< progPy basicNewDict
@@ -246,9 +269,8 @@ expQQ mode qq_src = do
              ]
       src_eval = prepareForEval mode antis src
   --
-  [| ( $(TH.lift $ Code $ T.encodeUtf8 $ T.pack src_eval)
-     , mconcat $(TH.listE args)
-     )
+  [| PyQuote ($(TH.lift $ codeFromString src_eval))
+             (mconcat $(TH.listE args))
    |]
 
 
