@@ -10,7 +10,8 @@ module Python.Internal.EvalQQ
   , Code
   , codeFromText
   , codeFromString
-  , DictBinder
+  , unsafeWithCode
+  , DictBinder(..)
   , PyQuote(..)
     -- * Code generation
   , expQQ

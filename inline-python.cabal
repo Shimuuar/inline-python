@@ -70,6 +70,7 @@ Library
     Python.Inline
     Python.Inline.Literal
     Python.Inline.QQ
+    Python.Inline.Eval
     Python.Inline.Types
   Other-modules:
     Python.Internal.CAPI
