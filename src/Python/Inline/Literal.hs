@@ -46,6 +46,7 @@ import Foreign.Storable
 import Foreign.Marshal.Alloc     (alloca,mallocBytes)
 import Foreign.Marshal.Utils     (copyBytes)
 import GHC.Float                 (float2Double, double2Float)
+import Data.Complex              (Complex((:+)))
 
 import Language.C.Inline         qualified as C
 import Language.C.Inline.Unsafe  qualified as CU
@@ -202,6 +203,24 @@ deriving via CDouble instance FromPy Double
 instance ToPy   Float where basicToPy   = basicToPy . float2Double
 instance FromPy Float where basicFromPy = fmap double2Float . basicFromPy
 
+instance ToPy (Complex Float) where
+  basicToPy (x:+y) = basicToPy $ float2Double x :+ float2Double y
+instance FromPy (Complex Float) where
+  basicFromPy xy_py = do
+     x :+ y <- basicFromPy xy_py
+     return $ double2Float x :+ double2Float y
+
+instance ToPy (Complex Double) where
+  basicToPy (x:+y) = Py [CU.exp| PyObject* { PyComplex_FromDoubles($(double x'), $(double y')) } |]
+   where x' = CDouble x
+         y' = CDouble y
+instance FromPy (Complex Double) where
+  basicFromPy xy_py = do
+    CDouble x <- Py [CU.exp| double { PyComplex_RealAsDouble($(PyObject *xy_py)) } |]
+    checkThrowBadPyType
+    CDouble y <- Py [CU.exp| double { PyComplex_ImagAsDouble($(PyObject *xy_py)) } |]
+    checkThrowBadPyType
+    return $ x :+ y
 
 instance ToPy Int where
   basicToPy

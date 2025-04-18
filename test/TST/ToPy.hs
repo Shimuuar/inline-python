@@ -5,6 +5,7 @@ module TST.ToPy (tests) where
 import Data.ByteString      qualified as BS
 import Data.Set             qualified as Set
 import Data.Map.Strict      qualified as Map
+import Data.Complex         (Complex((:+)))
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
@@ -16,6 +17,9 @@ tests :: TestTree
 tests = testGroup "ToPy"
   [ testCase "Int"            $ runPy $ let i = 1234    :: Int    in [py_| assert i_hs == 1234    |]
   , testCase "Double"         $ runPy $ let i = 1234.25 :: Double in [py_| assert i_hs == 1234.25 |]
+  , testCase "Complex" $ runPy $
+      let z = 5.5 :+ 7.5 :: Complex Double
+      in [py_| assert (z_hs.real == 5.5); assert (z_hs.imag == 7.5)|]
   , testCase "Char ASCII"     $ runPy $ let c = 'a'    in [py_| assert c_hs == 'a' |]
   , testCase "Char unicode"   $ runPy $ let c = 'ы'    in [py_| assert c_hs == 'ы' |]
   , testCase "String ASCII"   $ runPy $ let c = "asdf"::String in [py_| assert c_hs == 'asdf' |]
