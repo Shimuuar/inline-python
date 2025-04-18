@@ -10,6 +10,7 @@ import Data.Set        (Set)
 import Data.Map.Strict (Map)
 import Data.Text       qualified as T
 import Data.Text.Lazy  qualified as TL
+import Data.Complex (Complex)
 import Foreign.C.Types
 
 import Test.Tasty
@@ -61,6 +62,9 @@ tests = testGroup "Roundtrip"
       -- Floating point
     , testRoundtrip @Double
     , testRoundtrip @Float
+      -- Complex
+    , testRoundtrip @(Complex Double)
+    , testRoundtrip @(Complex Float)
       -- Other scalars
     , testRoundtrip @Char
     , testRoundtrip @Bool
@@ -71,6 +75,7 @@ tests = testGroup "Roundtrip"
     , testRoundtrip @(Int,Int,Int,Char)
     , testRoundtrip @[Int]
     , testRoundtrip @[[Int]]
+    , testRoundtrip @[Complex Double]
     , testRoundtrip @(Set Int)
     , testRoundtrip @(Map Int Int)
     -- , testRoundtrip @String -- Trips on zero byte as it should

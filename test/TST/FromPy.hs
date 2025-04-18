@@ -9,6 +9,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
 import Python.Inline.QQ
+import Data.Complex (Complex((:+)))
 
 tests :: TestTree
 tests = testGroup "FromPy"
@@ -21,6 +22,13 @@ tests = testGroup "FromPy"
     [ testCase "Int->Double"    $ eq @Double (Just 1234)    [pye| 1234    |]
     , testCase "Double->Double" $ eq @Double (Just 1234.25) [pye| 1234.25 |]
     , testCase "None->Double"   $ eq @Double Nothing        [pye| None    |]
+    ]
+  , testGroup "Complex"
+    [ testCase "Int->Complex"     $ eq @(Complex Double) (Just 1234)    [pye| 1234    |]
+    , testCase "Double->Complex"  $ eq @(Complex Double) (Just 1234.25) [pye| 1234.25 |]
+    , testCase "Complex->Complex" $ eq @(Complex Double) (Just $ 1234.5 :+ 6789)
+                                     [pye| 1234.5+6789.0j |]
+    , testCase "None->Complex"    $ eq @(Complex Double) Nothing        [pye| None    |]
     ]
   , testGroup "Char"
     [ testCase "0"    $ eq @Char Nothing    [pye| ""   |]
