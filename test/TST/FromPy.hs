@@ -11,6 +11,9 @@ import Python.Inline
 import Python.Inline.QQ
 import Data.Complex (Complex((:+)))
 
+import TST.Util
+
+
 tests :: TestTree
 tests = testGroup "FromPy"
   [ testGroup "Int"
@@ -90,9 +93,6 @@ tests = testGroup "FromPy"
     , testCase "Int" $ eq @[Int] Nothing        [pye| None    |]
     ]
   ]
-
-eq :: (Eq a, Show a, FromPy a) => Maybe a -> (Py PyObject) -> IO ()
-eq a action = assertEqual "fromPy: " a =<< runPy (fromPy =<< action)
 
 failE :: forall a. (Eq a, Show a, FromPy a) => PyObject -> Py ()
 failE p = fromPyEither @a p >>= \case

@@ -131,6 +131,12 @@ tests = testGroup "Run python"
         except NameError:
             pass
         |]
+  , testCase "pyf works" $ do
+      let x = 12 :: Int
+      eq (Just (482412::Int)) [pyf|
+         xs = [i*x_hs for i in [1, 200, 40000]]
+         return sum(xs)
+         |]
   ]
 
 data Stop = Stop

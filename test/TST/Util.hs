@@ -16,3 +16,5 @@ throwsPyIO :: IO () -> IO ()
 throwsPyIO io = (io >> assertFailure "Evaluation should raise python exception")
   `catch` (\(_::PyError) -> pure ())
 
+eq :: (Eq a, Show a, FromPy a) => Maybe a -> (Py PyObject) -> IO ()
+eq a action = assertEqual "fromPy: " a =<< runPy (fromPy =<< action)
