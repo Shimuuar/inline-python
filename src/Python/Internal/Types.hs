@@ -16,6 +16,12 @@ module Python.Internal.Types
   , PyInternalError(..)
   , Py(..)
   , pyIO
+    -- ** Python code wrappers
+  , PyQuote(..)
+  , Code(..)
+  , codeFromText
+  , codeFromString
+  , DictBinder(..)
     -- * inline-C
   , pyCtx
     -- * Patterns
@@ -33,9 +39,13 @@ import Control.Monad.Primitive (PrimMonad(..),RealWorld)
 import Control.Exception
 import Data.Coerce
 import Data.Int
+import Data.ByteString             qualified as BS
 import Data.Map.Strict             qualified as Map
+import Data.Text                   qualified as T
+import Data.Text.Encoding          qualified as T
 import Foreign.Ptr
 import Foreign.C.Types
+import Language.Haskell.TH.Syntax  qualified as TH
 import GHC.ForeignPtr
 
 import Language.C.Types
@@ -73,7 +83,7 @@ data PyError
   | PythonNotInitialized
     -- ^ Python interpreter is not initialized
   | PythonIsFinalized
-    -- ^ Python interpreter is not initialized    
+    -- ^ Python interpreter is not initialized
   deriving stock    (Show)
   deriving anyclass (Exception)
 
@@ -114,6 +124,42 @@ instance PrimMonad Py where
   type PrimState Py = RealWorld
   primitive = Py . primitive
   {-# INLINE primitive #-}
+
+
+----------------------------------------------------------------
+-- Code wrappers
+----------------------------------------------------------------
+
+-- | Quasiquoted python code. It contains source code and closure
+--   which populates dictionary with local variables.
+data PyQuote = PyQuote
+  { code   :: !Code
+  , binder :: !DictBinder
+  }
+
+
+-- | UTF-8 encoded python source code. Usually it's produced by
+--   Template Haskell's 'TH.lift' function.
+newtype Code = Code BS.ByteString
+  deriving stock (Show, TH.Lift)
+
+-- | Create properly encoded @Code@. This function doesn't check
+--   syntactic validity.
+codeFromText :: T.Text -> Code
+codeFromText = Code . T.encodeUtf8
+
+-- | Create properly encoded @Code@. This function doesn't check
+--   syntactic validity.
+codeFromString :: String -> Code
+codeFromString = codeFromText . T.pack
+
+-- | Closure which stores values in provided dictionary
+newtype DictBinder = DictBinder { bind :: Ptr PyObject -> Py () }
+
+instance Semigroup DictBinder where
+  f <> g = DictBinder $ \p -> f.bind p >> g.bind p
+instance Monoid DictBinder where
+  mempty = DictBinder $ \_ -> pure ()
 
 
 ----------------------------------------------------------------

@@ -29,6 +29,14 @@ module Python.Internal.Eval
   , mustThrowPyError
   , checkThrowBadPyType
   , throwOnNULL
+    -- * Exec & eval
+  , Namespace(..)
+  , Main(..)
+  , Temp(..)
+  , PtrNamespace(..)
+  , unsafeWithCode
+  , eval
+  , exec
     -- * Debugging
   , debugPrintPy
   ) where
@@ -42,6 +50,8 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
 import Data.Maybe
 import Data.Function
+import Data.ByteString           qualified as BS
+import Data.ByteString.Unsafe    qualified as BS
 import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -660,6 +670,114 @@ checkThrowBadPyType = do
   case r of
     0 -> pure ()
     _ -> throwM BadPyType
+
+
+----------------------------------------------------------------
+-- Eval/exec
+----------------------------------------------------------------
+
+-- | Type class for values representing python dictionaries containing
+--   global or local variables.
+class Namespace a where
+  -- | Returns dictionary object. Caller takes ownership of returned
+  --   object.
+  basicNamespaceDict :: a -> Py (Ptr PyObject)
+
+
+-- | Namespace for the top level code execution.
+data Main = Main
+
+
+instance Namespace Main where
+  -- NOTE: almost dupe of basicMainDict
+  basicNamespaceDict _ =
+    throwOnNULL =<< Py [CU.block| PyObject* {
+      PyObject* main_module = PyImport_AddModule("__main__");
+      if( PyErr_Occurred() )
+          return NULL;
+      PyObject* dict = PyModule_GetDict(main_module);
+      Py_XINCREF(dict);
+      return dict;
+      }|]
+
+-- | Temporary namespace which get destroyed after execution
+data Temp = Temp
+
+instance Namespace Temp where
+  basicNamespaceDict _ = basicNewDict
+
+-- | Newtype wrapper for bare python object. It's assumed to be a
+--   dictionary. This is not checked.
+newtype PtrNamespace = PtrNamespace (Ptr PyObject)
+
+instance Namespace PtrNamespace where
+  basicNamespaceDict (PtrNamespace p) = do
+    Py [CU.block| void { Py_XINCREF($(PyObject* p)); } |]
+    return p
+
+
+-- | Evaluate python expression
+eval :: (Namespace global, Namespace local)
+     => global  -- ^ Data type providing global variables dictionary
+     -> local   -- ^ Data type providing local variables dictionary
+     -> PyQuote -- ^ Source code
+     -> Py PyObject
+eval globals locals q = runProgram $ do
+  p_py      <- unsafeWithCode q.code
+  p_globals <- takeOwnership =<< progPy (basicNamespaceDict globals)
+  p_locals  <- takeOwnership =<< progPy (basicNamespaceDict locals)
+  progPy $ do
+    q.binder.bind p_locals
+    p_res <- Py [C.block| PyObject* {
+      PyObject* globals = $(PyObject* p_globals);
+      PyObject* locals  = $(PyObject* p_locals);
+      // Compile code
+      PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_eval_input);
+      if( PyErr_Occurred() ) {
+          return NULL;
+      }
+      // Evaluate expression
+      PyObject* r = PyEval_EvalCode(code, globals, locals);
+      Py_DECREF(code);
+      return r;
+      }|]
+    checkThrowPyError
+    newPyObject p_res
+{-# SPECIALIZE eval :: Main -> Temp -> PyQuote -> Py PyObject #-}
+
+-- | Evaluate sequence of python statements
+exec :: (Namespace global, Namespace local)
+     => global  -- ^ Data type providing global variables dictionary
+     -> local   -- ^ Data type providing local variables dictionary
+     -> PyQuote -- ^ Source code
+     -> Py ()
+exec globals locals q = runProgram $ do
+  p_py      <- unsafeWithCode q.code
+  p_globals <- takeOwnership =<< progPy (basicNamespaceDict globals)
+  p_locals  <- takeOwnership =<< progPy (basicNamespaceDict locals)
+  progPy $ do
+    q.binder.bind p_locals
+    Py[C.block| void {
+      PyObject* globals = $(PyObject* p_globals);
+      PyObject* locals  = $(PyObject* p_locals);
+      // Compile code
+      PyObject *code = Py_CompileString($(char* p_py), "<interactive>", Py_file_input);
+      if( PyErr_Occurred() ){
+          return;
+      }
+      // Execute statements
+      PyObject* res = PyEval_EvalCode(code, globals, locals);
+      Py_XDECREF(res);
+      Py_DECREF(code);
+      } |]
+    checkThrowPyError
+{-# SPECIALIZE exec :: Main -> Main -> PyQuote -> Py () #-}
+{-# SPECIALIZE exec :: Main -> Temp -> PyQuote -> Py () #-}
+
+-- | Obtain pointer to code
+unsafeWithCode :: Code -> Program r (Ptr CChar)
+unsafeWithCode (Code bs) = Program $ ContT $ \fun ->
+  Py (BS.unsafeUseAsCString bs $ unsafeRunPy . fun)
 
 
 ----------------------------------------------------------------
