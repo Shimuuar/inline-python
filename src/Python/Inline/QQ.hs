@@ -34,11 +34,13 @@ module Python.Inline.QQ
   , py_
   , pye
   , pyf
+  , pycode
   ) where
 
 import Language.Haskell.TH.Quote
 
 import Python.Internal.EvalQQ
+import Python.Internal.Eval
 
 
 -- | Evaluate sequence of python statements. It works in the same way
@@ -48,7 +50,7 @@ import Python.Internal.EvalQQ
 --   It creates value of type @Py ()@
 pymain :: QuasiQuoter
 pymain = QuasiQuoter
-  { quoteExp  = \txt -> [| evaluatorPymain $(expQQ Exec txt) |]
+  { quoteExp  = \txt -> [| exec Main Main $(expQQ Exec txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -61,7 +63,7 @@ pymain = QuasiQuoter
 --   It creates value of type @Py ()@
 py_ :: QuasiQuoter
 py_ = QuasiQuoter
-  { quoteExp  = \txt -> [| evaluatorPy_ $(expQQ Exec txt) |]
+  { quoteExp  = \txt -> [| exec Main Temp $(expQQ Exec txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -73,7 +75,7 @@ py_ = QuasiQuoter
 --   This quote creates object of type @Py PyObject@
 pye :: QuasiQuoter
 pye = QuasiQuoter
-  { quoteExp  = \txt -> [| evaluatorPye $(expQQ Eval txt) |]
+  { quoteExp  = \txt -> [| eval Main Temp $(expQQ Eval txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
@@ -86,6 +88,20 @@ pye = QuasiQuoter
 pyf :: QuasiQuoter
 pyf = QuasiQuoter
   { quoteExp  = \txt -> [| evaluatorPyf $(expQQ Fun txt) |]
+  , quotePat  = error "quotePat"
+  , quoteType = error "quoteType"
+  , quoteDec  = error "quoteDec"
+  }
+
+-- | Create quote of python code suitable for use with
+--   'Python.Inline.Eval.exec'
+--
+--   It creates value of type @PyQuote@
+--
+--   @since 0.2@
+pycode :: QuasiQuoter
+pycode = QuasiQuoter
+  { quoteExp  = \txt -> expQQ Exec txt
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"

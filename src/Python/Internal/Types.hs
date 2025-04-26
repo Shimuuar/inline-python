@@ -9,6 +9,7 @@
 module Python.Internal.Types
   ( -- * Data type
     PyObject(..)
+  , withPyObject
   , unsafeWithPyObject
   , PyThreadState
   , PyError(..)
@@ -16,6 +17,12 @@ module Python.Internal.Types
   , PyInternalError(..)
   , Py(..)
   , pyIO
+    -- ** Python code wrappers
+  , PyQuote(..)
+  , Code(..)
+  , codeFromText
+  , codeFromString
+  , DictBinder(..)
     -- * inline-C
   , pyCtx
     -- * Patterns
@@ -33,9 +40,13 @@ import Control.Monad.Primitive (PrimMonad(..),RealWorld)
 import Control.Exception
 import Data.Coerce
 import Data.Int
+import Data.ByteString             qualified as BS
 import Data.Map.Strict             qualified as Map
+import Data.Text                   qualified as T
+import Data.Text.Encoding          qualified as T
 import Foreign.Ptr
 import Foreign.C.Types
+import Language.Haskell.TH.Syntax  qualified as TH
 import GHC.ForeignPtr
 
 import Language.C.Types
@@ -53,6 +64,9 @@ data PyThreadState
 --   it could only be accessed only in IO monad.
 newtype PyObject = PyObject (ForeignPtr PyObject)
   deriving stock Show
+
+withPyObject :: forall a. PyObject -> (Ptr PyObject -> Py a) -> Py a
+withPyObject = coerce (withForeignPtr @PyObject @a)
 
 unsafeWithPyObject :: forall a. PyObject -> (Ptr PyObject -> Py a) -> Py a
 unsafeWithPyObject = coerce (unsafeWithForeignPtr @PyObject @a)
@@ -73,7 +87,7 @@ data PyError
   | PythonNotInitialized
     -- ^ Python interpreter is not initialized
   | PythonIsFinalized
-    -- ^ Python interpreter is not initialized    
+    -- ^ Python interpreter is not initialized
   deriving stock    (Show)
   deriving anyclass (Exception)
 
@@ -114,6 +128,52 @@ instance PrimMonad Py where
   type PrimState Py = RealWorld
   primitive = Py . primitive
   {-# INLINE primitive #-}
+
+
+----------------------------------------------------------------
+-- Code wrappers
+----------------------------------------------------------------
+
+-- | Quasiquoted python code. It contains source code and closure
+--   which populates dictionary with local variables.
+--
+--   @since 0.2@
+data PyQuote = PyQuote
+  { code   :: !Code
+  , binder :: !DictBinder
+  }
+
+
+-- | UTF-8 encoded python source code. Usually it's produced by
+--   Template Haskell's 'TH.lift' function.
+--
+--   @since 0.2@
+newtype Code = Code BS.ByteString
+  deriving stock (Show, TH.Lift)
+
+-- | Create properly encoded @Code@. This function doesn't check
+--   syntactic validity.
+--
+--   @since 0.2@
+codeFromText :: T.Text -> Code
+codeFromText = Code . T.encodeUtf8
+
+-- | Create properly encoded @Code@. This function doesn't check
+--   syntactic validity.
+--
+--   @since 0.2@
+codeFromString :: String -> Code
+codeFromString = codeFromText . T.pack
+
+-- | Closure which stores values in provided dictionary
+--
+--   @since 0.2@
+newtype DictBinder = DictBinder { bind :: Ptr PyObject -> Py () }
+
+instance Semigroup DictBinder where
+  f <> g = DictBinder $ \p -> f.bind p >> g.bind p
+instance Monoid DictBinder where
+  mempty = DictBinder $ \_ -> pure ()
 
 
 ----------------------------------------------------------------

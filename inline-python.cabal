@@ -57,7 +57,7 @@ Library
                    , stm              >=2.4
                    , template-haskell -any
                    , text             >=2
-                   , bytestring
+                   , bytestring       >=0.11.2
                    , exceptions       >=0.10
                    , vector           >=0.13
   hs-source-dirs:    src
@@ -70,6 +70,7 @@ Library
     Python.Inline
     Python.Inline.Literal
     Python.Inline.QQ
+    Python.Inline.Eval
     Python.Inline.Types
   Other-modules:
     Python.Internal.CAPI

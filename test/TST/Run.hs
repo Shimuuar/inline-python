@@ -6,10 +6,12 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
+import Data.Map.Strict        qualified as Map
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
 import Python.Inline.QQ
+import Python.Inline.Eval
 import TST.Util
 
 tests :: TestTree
@@ -130,6 +132,37 @@ tests = testGroup "Run python"
             assert False, "x shouln't be visible (2)"
         except NameError:
             pass
+        |]
+  , testCase "pyf works" $ do
+      let x = 12 :: Int
+      eq (Just (482412::Int)) [pyf|
+         xs = [i*x_hs for i in [1, 200, 40000]]
+         return sum(xs)
+         |]
+  , testCase "exec with Dict" $ runPy $ do
+      dct <- [pye| {} |]
+      exec Main (Dict dct) [pycode|
+        a = 12
+        b = 13
+      |]
+      throwsPy $ exec Main (Module dct) [pycode| |]
+      d <- fromPy dct
+      liftIO $ assertEqual "dict" (Just (Map.fromList [("a",12::Int),("b",13)])) d
+  , testCase "exec with Module" $ runPy $ do
+      m <- [pyf|
+        import importlib.util
+        spec = importlib.util.spec_from_loader("dyn", loader=None)
+        return importlib.util.module_from_spec(spec)
+        |]
+      exec Main (Module m) [pycode|
+        a = 12
+        b = 'asd'
+        |]
+      [py_|
+        import types
+        isinstance(m_hs, types.ModuleType)
+        assert m_hs.a == 12
+        assert m_hs.b == 'asd'
         |]
   ]
 
