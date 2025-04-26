@@ -79,7 +79,7 @@ evaluatorPyf (PyQuote code binder) = runProgram $ do
   p_kwargs <- takeOwnership =<< progPy basicNewDict
   progPy $ do
     -- Create function in p_locals
-    exec Main (PtrNamespace p_locals) (PyQuote code mempty)
+    exec Main (DictPtr p_locals) (PyQuote code mempty)
     -- Look up function
     p_fun <- getFunctionObject p_locals >>= \case
       NULL -> throwM $ PyInternalError "_inline_python_ must be present"

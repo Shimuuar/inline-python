@@ -33,7 +33,10 @@ module Python.Internal.Eval
   , Namespace(..)
   , Main(..)
   , Temp(..)
-  , PtrNamespace(..)
+  , Dict(..)
+  , DictPtr(..)
+  , Module(..)
+  , ModulePtr(..)
   , unsafeWithCode
   , eval
   , exec
@@ -687,9 +690,7 @@ class Namespace a where
 -- | Namespace for the top level code execution.
 data Main = Main
 
-
 instance Namespace Main where
-  -- NOTE: almost dupe of basicMainDict
   basicNamespaceDict _ =
     throwOnNULL =<< Py [CU.block| PyObject* {
       PyObject* main_module = PyImport_AddModule("__main__");
@@ -700,20 +701,49 @@ instance Namespace Main where
       return dict;
       }|]
 
+
 -- | Temporary namespace which get destroyed after execution
 data Temp = Temp
 
 instance Namespace Temp where
   basicNamespaceDict _ = basicNewDict
 
+
 -- | Newtype wrapper for bare python object. It's assumed to be a
 --   dictionary. This is not checked.
-newtype PtrNamespace = PtrNamespace (Ptr PyObject)
+newtype DictPtr = DictPtr (Ptr PyObject)
 
-instance Namespace PtrNamespace where
-  basicNamespaceDict (PtrNamespace p) = do
-    Py [CU.block| void { Py_XINCREF($(PyObject* p)); } |]
-    return p
+instance Namespace DictPtr where
+  basicNamespaceDict (DictPtr p) = p <$ incref p
+
+
+-- | Newtype wrapper for bare python object. It's assumed to be a
+--   dictionary. This is not checked.
+newtype Dict = Dict PyObject
+
+instance Namespace Dict where
+  basicNamespaceDict (Dict d)
+    -- NOTE: We're incrementing counter inside bracket so we're safe.
+    = unsafeWithPyObject d (basicNamespaceDict . DictPtr)
+
+-- | Newtype wrapper over module object.
+newtype ModulePtr = ModulePtr (Ptr PyObject)
+
+instance Namespace ModulePtr where
+  basicNamespaceDict (ModulePtr p) = do
+    throwOnNULL =<< Py [CU.block| PyObject* {
+      PyObject* dict = PyModule_GetDict($(PyObject* p));
+      Py_XINCREF(dict);
+      return dict;
+      }|]
+
+-- | Newtype wrapper over module object.
+newtype Module = Module PyObject
+
+instance Namespace Module where
+  basicNamespaceDict (Module d)
+    -- NOTE: We're incrementing counter inside bracket so we're safe.
+    = unsafeWithPyObject d (basicNamespaceDict . ModulePtr)
 
 
 -- | Evaluate python expression

@@ -11,12 +11,13 @@ module Python.Inline.Eval
   , Namespace(..)
   , Main(..)
   , Temp(..)
+  , Dict(..)
+  , Module(..)
     -- ** Data types
   , Code
   , codeFromText
   , codeFromString
   , DictBinder
-
   ) where
 
 import Python.Internal.Types
