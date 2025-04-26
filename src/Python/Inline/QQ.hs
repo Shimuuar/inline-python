@@ -97,6 +97,8 @@ pyf = QuasiQuoter
 --   'Python.Inline.Eval.exec'
 --
 --   It creates value of type @PyQuote@
+--
+--   @since 0.2@
 pycode :: QuasiQuoter
 pycode = QuasiQuoter
   { quoteExp  = \txt -> expQQ Exec txt

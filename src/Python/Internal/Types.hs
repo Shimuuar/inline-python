@@ -136,6 +136,8 @@ instance PrimMonad Py where
 
 -- | Quasiquoted python code. It contains source code and closure
 --   which populates dictionary with local variables.
+--
+--   @since 0.2@
 data PyQuote = PyQuote
   { code   :: !Code
   , binder :: !DictBinder
@@ -144,20 +146,28 @@ data PyQuote = PyQuote
 
 -- | UTF-8 encoded python source code. Usually it's produced by
 --   Template Haskell's 'TH.lift' function.
+--
+--   @since 0.2@
 newtype Code = Code BS.ByteString
   deriving stock (Show, TH.Lift)
 
 -- | Create properly encoded @Code@. This function doesn't check
 --   syntactic validity.
+--
+--   @since 0.2@
 codeFromText :: T.Text -> Code
 codeFromText = Code . T.encodeUtf8
 
 -- | Create properly encoded @Code@. This function doesn't check
 --   syntactic validity.
+--
+--   @since 0.2@
 codeFromString :: String -> Code
 codeFromString = codeFromText . T.pack
 
 -- | Closure which stores values in provided dictionary
+--
+--   @since 0.2@
 newtype DictBinder = DictBinder { bind :: Ptr PyObject -> Py () }
 
 instance Semigroup DictBinder where

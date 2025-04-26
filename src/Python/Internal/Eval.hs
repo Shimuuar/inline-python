@@ -681,6 +681,8 @@ checkThrowBadPyType = do
 
 -- | Type class for values representing python dictionaries containing
 --   global or local variables.
+--
+--   @since 0.2@
 class Namespace a where
   -- | Returns dictionary object. Caller takes ownership of returned
   --   object.
@@ -688,6 +690,8 @@ class Namespace a where
 
 
 -- | Namespace for the top level code execution.
+--
+--   @since 0.2@
 data Main = Main
 
 instance Namespace Main where
@@ -703,6 +707,8 @@ instance Namespace Main where
 
 
 -- | Temporary namespace which get destroyed after execution
+--
+--   @since 0.2@
 data Temp = Temp
 
 instance Namespace Temp where
@@ -711,6 +717,8 @@ instance Namespace Temp where
 
 -- | Newtype wrapper for bare python object. It's assumed to be a
 --   dictionary. This is not checked.
+--
+--   @since 0.2@
 newtype DictPtr = DictPtr (Ptr PyObject)
 
 instance Namespace DictPtr where
@@ -719,6 +727,8 @@ instance Namespace DictPtr where
 
 -- | Newtype wrapper for bare python object. It's assumed to be a
 --   dictionary. This is not checked.
+--
+--   @since 0.2@
 newtype Dict = Dict PyObject
 
 instance Namespace Dict where
@@ -727,6 +737,8 @@ instance Namespace Dict where
     = unsafeWithPyObject d (basicNamespaceDict . DictPtr)
 
 -- | Newtype wrapper over module object.
+--
+--   @since 0.2@
 newtype ModulePtr = ModulePtr (Ptr PyObject)
 
 instance Namespace ModulePtr where
@@ -747,6 +759,8 @@ instance Namespace Module where
 
 
 -- | Evaluate python expression
+--
+--   @since 0.2@
 eval :: (Namespace global, Namespace local)
      => global  -- ^ Data type providing global variables dictionary
      -> local   -- ^ Data type providing local variables dictionary
@@ -776,6 +790,8 @@ eval globals locals q = runProgram $ do
 {-# SPECIALIZE eval :: Main -> Temp -> PyQuote -> Py PyObject #-}
 
 -- | Evaluate sequence of python statements
+--
+--   @since 0.2@
 exec :: (Namespace global, Namespace local)
      => global  -- ^ Data type providing global variables dictionary
      -> local   -- ^ Data type providing local variables dictionary
