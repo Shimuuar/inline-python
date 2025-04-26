@@ -34,6 +34,7 @@ module Python.Inline.QQ
   , py_
   , pye
   , pyf
+  , pycode
   ) where
 
 import Language.Haskell.TH.Quote
@@ -87,6 +88,18 @@ pye = QuasiQuoter
 pyf :: QuasiQuoter
 pyf = QuasiQuoter
   { quoteExp  = \txt -> [| evaluatorPyf $(expQQ Fun txt) |]
+  , quotePat  = error "quotePat"
+  , quoteType = error "quoteType"
+  , quoteDec  = error "quoteDec"
+  }
+
+-- | Create quote of python code suitable for use with
+--   'Python.Inline.Eval.exec'
+--
+--   It creates value of type @PyQuote@
+pycode :: QuasiQuoter
+pycode = QuasiQuoter
+  { quoteExp  = \txt -> expQQ Exec txt
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
