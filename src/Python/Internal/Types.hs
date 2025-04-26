@@ -9,6 +9,7 @@
 module Python.Internal.Types
   ( -- * Data type
     PyObject(..)
+  , withPyObject
   , unsafeWithPyObject
   , PyThreadState
   , PyError(..)
@@ -63,6 +64,9 @@ data PyThreadState
 --   it could only be accessed only in IO monad.
 newtype PyObject = PyObject (ForeignPtr PyObject)
   deriving stock Show
+
+withPyObject :: forall a. PyObject -> (Ptr PyObject -> Py a) -> Py a
+withPyObject = coerce (withForeignPtr @PyObject @a)
 
 unsafeWithPyObject :: forall a. PyObject -> (Ptr PyObject -> Py a) -> Py a
 unsafeWithPyObject = coerce (unsafeWithForeignPtr @PyObject @a)
