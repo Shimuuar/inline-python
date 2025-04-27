@@ -53,7 +53,6 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Cont
 import Data.Maybe
 import Data.Function
-import Data.ByteString           qualified as BS
 import Data.ByteString.Unsafe    qualified as BS
 import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
@@ -305,10 +304,10 @@ finalizePython = join $ atomically $ readTVar globalPyState >>= \case
     Py_Finalize();
     } |]
   -- We need to call Py_Finalize on main thread
-  RunningN _ eval _ tid_gc -> checkLock $ do
+  RunningN _ lock_eval _ tid_gc -> checkLock $ do
     killThread tid_gc
     resp <- newEmptyMVar
-    putMVar eval $ StopReq resp
+    putMVar lock_eval $ StopReq resp
     takeMVar resp
   where
     checkLock action = readTVar globalPyLock >>= \case
@@ -485,7 +484,7 @@ runPyInMain py
       InInitialization -> retry
       InFinalization   -> retry
       Running1         -> throwSTM $ PyInternalError "runPyInMain: Running1"
-      RunningN _ eval tid_main _ -> readTVar globalPyLock >>= \case
+      RunningN _ eval_lock tid_main _ -> readTVar globalPyLock >>= \case
         LockUninialized -> throwSTM PythonNotInitialized
         LockFinalized   -> throwSTM PythonIsFinalized
         LockedByGC      -> retry
@@ -493,9 +492,9 @@ runPyInMain py
         LockUnlocked    -> do
           writeTVar globalPyLock $ Locked tid_main []
           pure ( atomically (releaseLock tid_main)
-               , evalInOtherThread tid_main eval
+               , evalInOtherThread tid_main eval_lock
                )
-        -- If we can grab lock and main thread taken lock we're
+        -- If we513 can grab lock and main thread taken lock we're
         -- already executing on main thread. We can simply execute code
         Locked t ts
           | t /= tid
@@ -508,12 +507,12 @@ runPyInMain py
           | otherwise -> do
               writeTVar globalPyLock $ Locked tid_main (t : ts)
               pure ( atomically (releaseLock tid_main)
-                   , evalInOtherThread tid_main eval
+                   , evalInOtherThread tid_main eval_lock
                    )
     --
-    evalInOtherThread tid_main eval = do
+    evalInOtherThread tid_main eval_lock = do
       r <- mask_ $ do resp <- newEmptyMVar
-                      putMVar eval $ EvalReq py resp
+                      putMVar eval_lock $ EvalReq py resp
                       takeMVar resp `onException` throwTo tid_main InterruptMain
       either throwM pure r
 
