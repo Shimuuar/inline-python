@@ -139,6 +139,11 @@ instance ToPy PyObject where
 instance FromPy PyObject where
   basicFromPy p = incref p >> newPyObject p
 
+deriving newtype instance ToPy   Module
+deriving newtype instance FromPy Module
+deriving newtype instance ToPy   Dict
+deriving newtype instance FromPy Dict
+
 instance ToPy () where
   basicToPy () = Py [CU.exp| PyObject* { Py_None } |]
 
