@@ -416,6 +416,24 @@ instance (FromPy a, FromPy b, FromPy c, FromPy d) => FromPy (a,b,c,d) where
                 d <- basicFromPy p_d
                 pure (a,b,c,d)
 
+
+-- | @Nothing@ is encoded as @None@. @Just a@ same as @a@.
+--
+-- @since 0.2
+instance (ToPy a) => ToPy (Maybe a) where
+  basicToPy Nothing  = Py [CU.exp| PyObject* { Py_None } |]
+  basicToPy (Just a) = basicToPy a
+
+-- | @None@ is decoded as @Nothing@ rest is attempted to be decoded as @a@
+--
+-- @since 0.2
+instance (FromPy a) => FromPy (Maybe a) where
+  basicFromPy p =
+    Py [CU.exp| bool { Py_None == $(PyObject *p) } |] >>= \case
+      0 -> Just <$> basicFromPy p
+      _ -> pure Nothing
+
+
 instance (ToPy a) => ToPy [a] where
   basicToPy = basicListToPy
 

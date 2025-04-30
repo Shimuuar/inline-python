@@ -1,7 +1,7 @@
 0.2 [..]
 ----------------
 * `FromPy`/`ToPy` instances added for: `Complex`, both strict and lazy `Text` &
-  `ByteString`, `ShortByteString`.
+  `ByteString`, `ShortByteString`, `Maybe`
 * Module `Python.Inline.Eval` added which support for eval/exec with user
   supplied global and local variables.
 * QuasiQuotes `Python.Inline.QQ.pycode` added.
