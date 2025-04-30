@@ -6,6 +6,7 @@ module Python.Internal.Program
   , runProgram
   , progPy
   , progIO
+  , progIOBracket
     -- * Control flow
   , abort
   , abortM
@@ -63,6 +64,9 @@ progIO = Program . lift . pyIO
 
 progPy :: Py a -> Program r a
 progPy = Program . lift
+
+progIOBracket :: ((a -> IO r) -> IO r) -> Program r a
+progIOBracket = coerce
 
 -- | Early exit from continuation monad.
 abort :: r -> Program r a

@@ -50,8 +50,8 @@ varName :: String -> PyVarName
 varName = PyVarName . T.encodeUtf8 . T.pack
 
 unsafeWithPyVarName :: PyVarName -> Program r (Ptr CChar)
-unsafeWithPyVarName (PyVarName bs) = Program $ ContT $ \fun ->
-  Py (BS.unsafeUseAsCString bs $ unsafeRunPy . fun)
+unsafeWithPyVarName (PyVarName bs)
+  = progIOBracket (BS.unsafeUseAsCString bs)
 
 
 bindVar :: ToPy a => PyVarName -> a -> DictBinder
