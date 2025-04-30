@@ -1,6 +1,10 @@
-NEXT_VERSION [..]
+0.2 [..]
 ----------------
-* `FromPy`/`ToPy` instances for text and bytestrings data types.
+* `FromPy`/`ToPy` instances added for: `Complex`, both strict and lazy `Text` &
+  `ByteString`, `ShortByteString`.
+* Module `Python.Inline.Eval` added which support for eval/exec with user
+  supplied global and local variables.
+* QuasiQuotes `Python.Inline.QQ.pycode` added.
 
 0.1.1.1 [2025.03.10]
 --------------------
