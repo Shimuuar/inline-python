@@ -683,12 +683,13 @@ checkThrowBadPyType = do
 --
 --   @since 0.2@
 class Namespace a where
-  -- | Returns dictionary object. Caller takes ownership of returned
-  --   object.
+  -- | Returns dictionary object. Caller should take ownership of
+  --   returned object.
   basicNamespaceDict :: a -> Py (Ptr PyObject)
 
 
--- | Namespace for the top level code execution.
+-- | Namespace for the top level code execution. It corresponds to
+--   @\__dict\__@ field of a @\__main\__@ module.
 --
 --   @since 0.2@
 data Main = Main
@@ -724,8 +725,8 @@ instance Namespace DictPtr where
   basicNamespaceDict (DictPtr p) = p <$ incref p
 
 
--- | Newtype wrapper for bare python object. It's assumed to be a
---   dictionary. This is not checked.
+-- | Newtype wrapper for python dictionary. It's not checked whether
+--   object is actually dictionary.
 --
 --   @since 0.2@
 newtype Dict = Dict PyObject
@@ -757,7 +758,7 @@ instance Namespace Module where
     = unsafeWithPyObject d (basicNamespaceDict . ModulePtr)
 
 
--- | Evaluate python expression
+-- | Evaluate python expression. This is wrapper over python's @eval@.
 --
 --   @since 0.2@
 eval :: (Namespace global, Namespace local)
@@ -788,7 +789,7 @@ eval globals locals q = runProgram $ do
     newPyObject p_res
 {-# SPECIALIZE eval :: Main -> Temp -> PyQuote -> Py PyObject #-}
 
--- | Evaluate sequence of python statements
+-- | Evaluate sequence of python statements This is wrapper over python's @exec@.
 --
 --   @since 0.2@
 exec :: (Namespace global, Namespace local)
