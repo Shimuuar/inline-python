@@ -2,7 +2,7 @@ Cabal-Version:  3.0
 Build-Type:     Simple
 
 Name:           inline-python
-Version:        0.1.1.1
+Version:        0.2
 Synopsis:       Python interpreter embedded into haskell.
 Description:
   This package embeds python interpreter into haskell program and

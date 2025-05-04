@@ -208,17 +208,21 @@ deriving via CDouble instance FromPy Double
 instance ToPy   Float where basicToPy   = basicToPy . float2Double
 instance FromPy Float where basicFromPy = fmap double2Float . basicFromPy
 
+-- | @since 0.2
 instance ToPy (Complex Float) where
   basicToPy (x:+y) = basicToPy $ float2Double x :+ float2Double y
+-- | @since 0.2
 instance FromPy (Complex Float) where
   basicFromPy xy_py = do
      x :+ y <- basicFromPy xy_py
      return $ double2Float x :+ double2Float y
 
+-- | @since 0.2
 instance ToPy (Complex Double) where
   basicToPy (x:+y) = Py [CU.exp| PyObject* { PyComplex_FromDoubles($(double x'), $(double y')) } |]
    where x' = CDouble x
          y' = CDouble y
+-- | @since 0.2
 instance FromPy (Complex Double) where
   basicFromPy xy_py = do
     CDouble x <- Py [CU.exp| double { PyComplex_RealAsDouble($(PyObject *xy_py)) } |]
@@ -412,6 +416,24 @@ instance (FromPy a, FromPy b, FromPy c, FromPy d) => FromPy (a,b,c,d) where
                 d <- basicFromPy p_d
                 pure (a,b,c,d)
 
+
+-- | @Nothing@ is encoded as @None@. @Just a@ same as @a@.
+--
+-- @since 0.2
+instance (ToPy a) => ToPy (Maybe a) where
+  basicToPy Nothing  = Py [CU.exp| PyObject* { Py_None } |]
+  basicToPy (Just a) = basicToPy a
+
+-- | @None@ is decoded as @Nothing@ rest is attempted to be decoded as @a@
+--
+-- @since 0.2
+instance (FromPy a) => FromPy (Maybe a) where
+  basicFromPy p =
+    Py [CU.exp| bool { Py_None == $(PyObject *p) } |] >>= \case
+      0 -> Just <$> basicFromPy p
+      _ -> pure Nothing
+
+
 instance (ToPy a) => ToPy [a] where
   basicToPy = basicListToPy
 
@@ -566,7 +588,9 @@ vectorToPy vec = runProgram $ do
     n_c = fromIntegral n :: CLLong
 
 
--- | @since NEXT_VERSION@. Converted to @bytes@
+-- | Converted to @bytes@
+--
+--   @since 0.2
 instance ToPy BS.ByteString where
   basicToPy bs = pyIO $ BS.unsafeUseAsCStringLen bs $ \(ptr,len) -> do
     let c_len = fromIntegral len :: CLLong
@@ -575,7 +599,9 @@ instance ToPy BS.ByteString where
       NULL -> unsafeRunPy mustThrowPyError
       _    -> return py
 
--- | @since NEXT_VERSION@. Accepts @bytes@ and @bytearray@
+-- | Accepts @bytes@ and @bytearray@
+--
+--   @since 0.2
 instance FromPy BS.ByteString where
   basicFromPy py = pyIO $ do
     [CU.exp| int { PyBytes_Check($(PyObject* py)) } |] >>= \case
@@ -595,16 +621,22 @@ instance FromPy BS.ByteString where
         copyBytes hs_buf py_buf sz
         BS.unsafePackMallocCStringLen (hs_buf, sz)
 
--- | @since NEXT_VERSION@. Converted to @bytes@
+-- | Converted to @bytes@
+--
+--   @since 0.2
 instance ToPy BL.ByteString where
   basicToPy = basicToPy . BL.toStrict
 
--- | @since NEXT_VERSION@. Accepts @bytes@ and @bytearray@
+-- | Accepts @bytes@ and @bytearray@
+--
+--   @since 0.2
 instance FromPy BL.ByteString where
   basicFromPy = fmap BL.fromStrict . basicFromPy
 
 
--- | @since NEXT_VERSION@. Accepts @bytes@ and @bytearray@
+-- | Accepts @bytes@ and @bytearray@
+--
+--   @since 0.2
 instance FromPy SBS.ShortByteString where
   basicFromPy py = pyIO $ do
     [CU.exp| int { PyBytes_Check($(PyObject* py)) } |] >>= \case
@@ -623,7 +655,9 @@ instance FromPy SBS.ShortByteString where
         bs <- BS.unsafePackCStringLen (buf, sz)
         evaluate $ SBS.toShort bs
 
--- | @since NEXT_VERSION@. Converted to @bytes@
+-- | Converted to @bytes@
+--
+--   @since 0.2
 instance ToPy SBS.ShortByteString where
   basicToPy bs = pyIO $ SBS.useAsCStringLen bs $ \(ptr,len) -> do
     let c_len = fromIntegral len :: CLLong
@@ -633,7 +667,7 @@ instance ToPy SBS.ShortByteString where
       _    -> return py
 
 
--- | @since NEXT_VERSION@.
+-- | @since 0.2@.
 instance ToPy T.Text where
   -- NOTE: Is there ore efficient way to access
   basicToPy str = pyIO $ BS.unsafeUseAsCStringLen bs $ \(ptr,len) -> do
@@ -645,11 +679,11 @@ instance ToPy T.Text where
     where
       bs = T.encodeUtf8 str
 
--- | @since NEXT_VERSION@.
+-- | @since 0.2@.
 instance ToPy TL.Text where
   basicToPy = basicToPy . TL.toStrict
 
--- | @since NEXT_VERSION@.
+-- | @since 0.2@.
 instance FromPy T.Text where
   basicFromPy py = pyIO $ do
     [CU.exp| int { PyUnicode_Check($(PyObject* py)) } |] >>= \case
@@ -660,7 +694,7 @@ instance FromPy T.Text where
         return $! T.decodeUtf8Lenient bs
       _ -> throwM BadPyType
 
--- | @since NEXT_VERSION@.
+-- | @since 0.2@.
 instance FromPy TL.Text where
   basicFromPy = fmap TL.fromStrict . basicFromPy
 

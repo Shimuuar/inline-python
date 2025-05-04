@@ -73,6 +73,8 @@ tests = testGroup "Roundtrip"
     , testRoundtrip @(Int,(Int,Int))
     , testRoundtrip @(Int,Int,Int)
     , testRoundtrip @(Int,Int,Int,Char)
+    , testRoundtrip @(Maybe Int)
+    , testRoundtrip @(Maybe T.Text)
     , testRoundtrip @[Int]
     , testRoundtrip @[[Int]]
     , testRoundtrip @[Complex Double]

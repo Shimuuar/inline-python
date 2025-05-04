@@ -29,6 +29,9 @@
 -- >         do_this()
 -- >         do_that()
 -- >         |]
+--
+-- If control over python's global and local variables is
+-- required. APIs from "Python.Inline.Eval" should be used instead.
 module Python.Inline.QQ
   ( pymain
   , py_
