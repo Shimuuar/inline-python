@@ -2,6 +2,7 @@
 -- python code in haskell programs. Take for example following program:
 --
 -- > {-# LANGUAGE QuasiQuotes #-}
+-- > import Control.Monad
 -- > import Python.Inline
 -- > import Python.Inline.QQ
 -- >
@@ -10,7 +11,7 @@
 -- >   let input = [1..10] :: [Int]
 -- >   let square :: Int -> Py Int
 -- >       square x = pure (x * x)
--- >   print =<< runPy $ do
+-- >   print <=< runPy $ do
 -- >     fromPy' @[Int] =<< [pye| [ square_hs(x) for x in input_hs ] |]
 --
 -- Quasiquotation 'Python.Inline.QQ.pye' captures variables @input@

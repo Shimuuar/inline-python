@@ -1,3 +1,7 @@
+0.2.0.1 [XXX]
+----------------
+* Documentation fixes
+
 0.2 [2025.05.04]
 ----------------
 * `FromPy`/`ToPy` instances added for: `Complex`, both strict and lazy `Text` &
