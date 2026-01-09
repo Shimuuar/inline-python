@@ -2,7 +2,7 @@ Cabal-Version:  3.0
 Build-Type:     Simple
 
 Name:           inline-python
-Version:        0.2
+Version:        0.2.0.1
 Synopsis:       Python interpreter embedded into haskell.
 Description:
   This package embeds python interpreter into haskell program and
@@ -22,6 +22,14 @@ extra-doc-files:
 extra-source-files:
   include/inline-python.h
   py/bound-vars.py
+
+Tested-With:
+  GHC == 9.2.8
+  GHC == 9.4.8
+  GHC == 9.6.7
+  GHC == 9.8.4
+  GHC == 9.10.2
+  GHC == 9.12.2
 
 source-repository head
   type:     git
