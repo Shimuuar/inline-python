@@ -92,6 +92,18 @@ tests = testGroup "FromPy"
     , testCase "[3]" $ eq @[Int] (Just [1,2,3]) [pye| [1,2,3] |]
     , testCase "Int" $ eq @[Int] Nothing        [pye| None    |]
     ]
+  , testGroup "Integer" $
+    let eqI = eq @Integer . Just
+    in concat
+       [ [ testCase (" 2^"++show k++"-1") $ eqI (2^k - 1)          [pye|   2**k_hs - 1  |]
+         , testCase (" 2^"++show k)       $ eqI (2^k    )          [pye|   2**k_hs      |]
+         , testCase (" 2^"++show k++"+1") $ eqI (2^k + 1)          [pye|   2**k_hs + 1  |]
+         , testCase ("-2^"++show k++"-1") $ eqI (negate $ 2^k - 1) [pye| -(2**k_hs - 1) |]
+         , testCase ("-2^"++show k)       $ eqI (negate $ 2^k    ) [pye| -(2**k_hs)     |]
+         , testCase ("-2^"++show k++"+1") $ eqI (negate $ 2^k + 1) [pye| -(2**k_hs + 1) |]
+         ]
+       | k <- [63,64,65,92,17,128,129,32100] :: [Int]
+       ]
   ]
 
 failE :: forall a. (Eq a, Show a, FromPy a) => PyObject -> Py ()

@@ -1,6 +1,9 @@
 #include <inline-python.h>
 #include <stdlib.h>
 
+#include "MachDeps.h"
+
+
 // ================================================================
 // Callbacks
 //
@@ -140,3 +143,70 @@ err_iter:
     return -1;
 }
 
+
+PyObject* inline_py_Integer_ToPy(
+    void*  buf,
+    size_t size,
+    int    sign
+    )
+{
+    PyObject* num =
+#if PY_MINOR_VERSION < 13
+        _PyLong_FromByteArray(buf, size,
+                              1, // Little endian
+                              0  // Unsigned
+        );
+#else
+        PyLong_FromNativeBytes(buf, size,
+                               Py_ASNATIVEBYTES_LITTLE_ENDIAN |
+                               Py_ASNATIVEBYTES_UNSIGNED_BUFFER
+        );
+#endif
+    if( sign ) {
+        PyObject* neg = PyNumber_Negative(num);
+        Py_DECREF(num);
+        return neg;
+    } else {
+        return num;
+    }
+}
+
+
+ssize_t inline_py_Long_ByteSize(PyObject* p) {
+    // See NOTE: [Integer encoding/decoding]
+    //
+    // PyLong_AsNativeBytes allows to compute buffer size but it does
+    // so according to python's memory layout
+#if WORD_SIZE_IN_BITS == 32
+    const int shiftW = 2;
+#elif WORD_SIZE_IN_BITS == 64
+    const int shiftW = 3;
+#else
+#error "Something wrong with MachDeps.h"
+#endif
+    const int     shift = shiftW + 3;
+    const ssize_t mask  = (1<<shift) - 1;
+    const ssize_t bits  = _PyLong_NumBits(p);
+    if( bits & mask ) {
+        return ((bits >> shift) + 1) << shiftW;
+    } else {
+        return (bits >> shift) << shiftW;
+    }
+}
+
+void inline_py_Integer_FromPy(
+    PyObject* p,
+    void*     buf,
+    size_t    size
+    )
+{
+    // N.B. _PyLong_AsByteArray changed signature in 3.13
+#if PY_MINOR_VERSION < 13
+    _PyLong_AsByteArray((PyLongObject*)p, buf, size,
+                        1, // little_endian
+                        0  // is_signed
+        );
+#else
+    PyLong_AsNativeBytes(p, buf, size, -1);
+#endif
+}

@@ -47,6 +47,7 @@ tests = testGroup "Roundtrip"
     , testRoundtrip @Word32
     , testRoundtrip @Word64
     , testRoundtrip @Word
+    , testRoundtrip @Integer
       -- C wrappers
     , testRoundtrip @CChar
     , testRoundtrip @CSChar
