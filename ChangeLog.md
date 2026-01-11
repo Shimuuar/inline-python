@@ -1,5 +1,8 @@
-0.2.0.1 [XXX]
+0.2.1.0 [XXX]
 ----------------
+* Python>=3.9 is supported now. Choice is somewhat arbitrary and likely will be
+  guided by availability of old python versions on github CI in the future.
+
 * Documentation fixes
 
 0.2 [2025.05.04]
