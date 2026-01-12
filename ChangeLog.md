@@ -1,8 +1,9 @@
 0.2.1.0 [XXX]
 ----------------
+* `From/ToPy` instance for `Integer`&`Natural` added.
+* `vector-0.13.2` is required
 * Only Python>=3.10 is supported now. Earlier versions are not supported anymore.
   Now they're tested on CI.
-
 * Documentation fixes
 
 0.2 [2025.05.04]

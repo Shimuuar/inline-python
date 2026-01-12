@@ -51,3 +51,33 @@ int inline_py_unpack_iterable(
     int        n,
     PyObject **out
     );
+
+// Python's C API only gained public function to create integers of
+// arbitrary size in 3.13. We have to use internals for earlier
+// versions.
+PyObject* inline_py_Integer_ToPy(
+    void*  buf,    // Buffer holding number 
+    size_t size,   // Buffer size in bytes
+    int    sign    // Sign of number (0 is +, 1 is -)
+);
+
+// Compute size of buffer which can hold decoded number 
+// and satistfy Integer's requirements
+//
+// See: NOTE: [Integer encoding/decoding]
+//
+// PRECONDITION: parameter must instance of PyLong. This is not
+//               checked.
+// PRECONDITION: passed number must be positive
+ssize_t inline_py_Long_ByteSize(PyObject* p);
+
+// Parse python integral number into buffer. This is compatibility
+// shim.
+//
+// PRECONDITION: parameter must instance of PyLong. This is not
+//               checked.
+void inline_py_Integer_FromPy(
+    PyObject* p,
+    void*     buf,
+    size_t    size
+);

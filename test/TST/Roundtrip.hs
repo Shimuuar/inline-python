@@ -1,5 +1,4 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE CPP                 #-}
 -- |
 module TST.Roundtrip (tests) where
 
@@ -12,12 +11,14 @@ import Data.Text       qualified as T
 import Data.Text.Lazy  qualified as TL
 import Data.Complex (Complex)
 import Foreign.C.Types
+import Numeric.Natural (Natural)
 
 import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.QuickCheck.Instances.Vector ()
 import Test.QuickCheck.Instances.ByteString ()
 import Test.QuickCheck.Instances.Text ()
+import Test.QuickCheck.Instances.Natural ()
 import Python.Inline
 import Python.Inline.QQ
 
@@ -25,9 +26,7 @@ import Data.ByteString             qualified as BS
 import Data.ByteString.Lazy        qualified as BL
 import Data.ByteString.Short       qualified as SBS
 import Data.Vector                 qualified as V
-#if MIN_VERSION_vector(0,13,2)
 import Data.Vector.Strict          qualified as VV
-#endif
 import Data.Vector.Storable        qualified as VS
 import Data.Vector.Primitive       qualified as VP
 import Data.Vector.Unboxed         qualified as VU
@@ -47,6 +46,8 @@ tests = testGroup "Roundtrip"
     , testRoundtrip @Word32
     , testRoundtrip @Word64
     , testRoundtrip @Word
+    , testRoundtrip @Integer
+    , testRoundtrip @Natural
       -- C wrappers
     , testRoundtrip @CChar
     , testRoundtrip @CSChar
@@ -85,9 +86,7 @@ tests = testGroup "Roundtrip"
     , testRoundtrip @(VS.Vector Int)
     , testRoundtrip @(VP.Vector Int)
     , testRoundtrip @(VU.Vector Int)
-#if MIN_VERSION_vector(0,13,2)
---    , testRoundtrip @(VV.Vector Int)
-#endif
+    , testRoundtrip @(VV.Vector Int)
     , testRoundtrip @BS.ByteString
     , testRoundtrip @BL.ByteString
     , testRoundtrip @SBS.ShortByteString

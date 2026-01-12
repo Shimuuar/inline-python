@@ -1,8 +1,8 @@
-{-# LANGUAGE CPP                      #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE MagicHash                #-}
 {-# LANGUAGE QuasiQuotes              #-}
 {-# LANGUAGE TemplateHaskell          #-}
+{-# LANGUAGE UnliftedFFITypes         #-}
 -- |
 -- Conversion between haskell data types and python values
 module Python.Inline.Literal
@@ -34,18 +34,22 @@ import Data.Text.Lazy              qualified as TL
 import Data.Vector.Generic         qualified as VG
 import Data.Vector.Generic.Mutable qualified as MVG
 import Data.Vector                 qualified as V
-#if MIN_VERSION_vector(0,13,2)
 import Data.Vector.Strict          qualified as VV
-#endif
 import Data.Vector.Storable        qualified as VS
 import Data.Vector.Primitive       qualified as VP
 import Data.Vector.Unboxed         qualified as VU
+import Data.Primitive.ByteArray    qualified as BA
+import Data.Primitive.Types        (Prim(..))
+import Numeric.Natural             (Natural)
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Storable
 import Foreign.Marshal.Alloc     (alloca,mallocBytes)
 import Foreign.Marshal.Utils     (copyBytes)
 import GHC.Float                 (float2Double, double2Float)
+import GHC.Exts                  (Int(..),Word(..),sizeofByteArray#,ByteArray#)
+import GHC.Num.Natural           qualified
+import GHC.Num.Integer           qualified
 import Data.Complex              (Complex((:+)))
 
 import Language.C.Inline         qualified as C
@@ -290,6 +294,121 @@ instance FromPy Word32 where
       | otherwise -> throwM OutOfRange
 
 
+
+-- NOTE: [Integer encoding/decoding]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- Interfacing between arbitrary precision integers in haskell and
+-- python is pain: they have different representations. And python got
+-- API for working with large numbers only in 3.13. We have to use
+-- internal API for earlier versions.
+--
+-- Only large number are discussed below. Small are straightforward
+-- enough.
+--
+--  + GHC's Integer use sign + little endian sequence of Word#. Since
+--    all supported platforms are LE it's same as little endian
+--    sequence of bytes.
+--
+--  + Important invariant: highest word must be nonzero!
+--
+--  + Python uses two-complement.
+--
+-- One problem is computation of required buffer size. (8byte word is
+-- assumed). For example 2^63 requires 9 bytes in two-complement
+-- encoding since we need one bit for sign. But 8 bytes enough for
+-- Integer's encoding. Sign is stored separately.
+
+
+-- | @since 0.2.1.0
+instance ToPy Integer where
+  basicToPy (GHC.Num.Integer.IS i) = basicToPy (I# i)
+  basicToPy (GHC.Num.Integer.IP p) = Py $ do
+    let n = fromIntegral (I# (sizeofByteArray# p)) :: CSize
+    inline_py_Integer_ToPy p n 0
+  basicToPy (GHC.Num.Integer.IN p) = Py $ do
+    let n = fromIntegral (I# (sizeofByteArray# p)) :: CSize
+    inline_py_Integer_ToPy p n 1
+
+-- | @since 0.2.1.0
+instance ToPy Natural where
+  basicToPy (GHC.Num.Natural.NS i) = basicToPy (W# i)
+  basicToPy (GHC.Num.Natural.NB p) = Py $ do
+    let n = fromIntegral (I# (sizeofByteArray# p)) :: CSize
+    inline_py_Integer_ToPy p n 0
+
+-- | @since 0.2.1.0
+instance FromPy Integer where
+  basicFromPy p = runProgram $ do
+    progIO [CU.exp| int { PyLong_Check($(PyObject *p)) } |] >>= \case
+      0 -> progIO $ throwM BadPyType
+      _ -> pure ()
+    -- At this point we know that p is number
+    p_overflow <- withPyAlloca
+    n <- progIO [CU.exp| long long { PyLong_AsLongLongAndOverflow($(PyObject* p), $(int* p_overflow)) } |]
+    progIO (peek p_overflow) >>= \case
+      -- Number fits into long long
+      0  -> return $! fromIntegral n
+      -- Number is positive
+      1  -> do
+        BA.ByteArray ba <- progIO $ decodePositiveInteger p
+        pure $ GHC.Num.Integer.IP ba
+      -- Number is negative
+      -1 -> do
+        neg <- takeOwnership
+           <=< progPy
+             $ throwOnNULL =<< Py [CU.exp| PyObject* { PyNumber_Negative( $(PyObject *p) ) } |]
+        BA.ByteArray ba <- progIO $ decodePositiveInteger neg
+        pure $ GHC.Num.Integer.IN ba
+      -- Unreachable
+      _ -> error "inline-py: FromPy Integer: INTERNAL ERROR"
+    where
+
+-- | @since 0.2.1.0
+instance FromPy Natural where
+  basicFromPy p = runProgram $ do
+    progIO [CU.exp| int { PyLong_Check($(PyObject *p)) } |] >>= \case
+      0 -> progIO $ throwM BadPyType
+      _ -> pure ()
+    p_overflow <- withPyAlloca
+    n <- progIO [CU.exp| long long { PyLong_AsLongLongAndOverflow($(PyObject* p), $(int* p_overflow)) } |]
+    progIO (peek p_overflow) >>= \case
+      -- Number fits into long long
+      0 | n < 0     -> progIO $ throwM OutOfRange
+        | otherwise -> return $! fromIntegral n
+      -- Number is negative
+      -1 -> progIO $ throwM OutOfRange
+      -- Number is positive.
+      --
+      -- NOTE that if size of bytearray is equal to size of word we
+      --      need to return small constructor
+      1  -> progIO $ decodePositiveInteger p >>= \case
+        BA.ByteArray ba
+          | I# (sizeofByteArray# ba) == (finiteBitSize (0::Word) `div` 8)
+            -> pure $! case indexByteArray# ba 0# of
+                 W# w -> GHC.Num.Natural.NS w
+          | otherwise
+            -> pure $! GHC.Num.Natural.NB ba
+      -- Unreachable
+      _ -> error "inline-py: FromPy Natural: INTERNAL ERROR"
+
+-- Decode large positive number:
+--  + Must be instance of PyLong
+--  + Must be positive
+decodePositiveInteger :: Ptr PyObject -> IO BA.ByteArray
+decodePositiveInteger p_num = do
+  sz <- [CU.exp| int { inline_py_Long_ByteSize( $(PyObject *p_num) ) } |]
+  buf@(BA.MutableByteArray ptr_buf) <- BA.newByteArray (fromIntegral sz)
+  _ <- inline_py_Integer_FromPy p_num ptr_buf (fromIntegral sz)
+  BA.unsafeFreezeByteArray buf
+
+
+
+foreign import ccall unsafe "inline_py_Integer_ToPy"
+  inline_py_Integer_ToPy :: ByteArray# -> CSize -> CInt -> IO (Ptr PyObject)
+foreign import ccall unsafe "inline_py_Integer_FromPy"
+  inline_py_Integer_FromPy :: Ptr PyObject -> BA.MutableByteArray# MVG.RealWorld -> CSize -> IO CInt
+
 -- | Encoded as 1-character string
 instance ToPy Char where
   basicToPy c = do
@@ -308,8 +427,7 @@ instance FromPy Char where
     r <- Py [CU.block| int {
       PyObject* p = $(PyObject *p);
       if( !PyUnicode_Check(p) )
-          return -1;
-      if( 1 != PyUnicode_GET_LENGTH(p) )
+          return -1;      if( 1 != PyUnicode_GET_LENGTH(p) )
           return -1;
       switch( PyUnicode_KIND(p) ) {
       case PyUnicode_1BYTE_KIND:
@@ -515,11 +633,9 @@ instance (ToPy a, VP.Prim a) => ToPy (VP.Vector a) where
 -- | Converts to python's list
 instance (ToPy a, VU.Unbox a) => ToPy (VU.Vector a) where
   basicToPy = vectorToPy
-#if MIN_VERSION_vector(0,13,2)
 -- | Converts to python's list
 instance (ToPy a) => ToPy (VV.Vector a) where
   basicToPy = vectorToPy
-#endif
 
 -- | Accepts python's sequence (@len@ and indexing)
 instance FromPy a => FromPy (V.Vector a) where
@@ -533,11 +649,9 @@ instance (FromPy a, VP.Prim a) => FromPy (VP.Vector a) where
 -- | Accepts python's sequence (@len@ and indexing)
 instance (FromPy a, VU.Unbox a) => FromPy (VU.Vector a) where
   basicFromPy = vectorFromPy
-#if MIN_VERSION_vector(0,13,2)
 -- | Accepts python's sequence (@len@ and indexing)
 instance FromPy a => FromPy (VV.Vector a) where
   basicFromPy = vectorFromPy
-#endif
 
 
 -- | Fold over python's iterator. Function takes ownership over iterator.
