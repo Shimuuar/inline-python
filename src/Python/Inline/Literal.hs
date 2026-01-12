@@ -325,8 +325,8 @@ instance FromPy Char where
        | otherwise -> pure $ chr $ fromIntegral r
 
 instance ToPy Bool where
-  basicToPy True  = Py [CU.exp| PyObject* { Py_True  } |]
-  basicToPy False = Py [CU.exp| PyObject* { Py_False } |]
+  basicToPy True  = Py [CU.block| PyObject* { Py_RETURN_TRUE;  } |]
+  basicToPy False = Py [CU.block| PyObject* { Py_RETURN_FALSE; } |]
 
 -- | Uses python's truthiness conventions
 instance FromPy Bool where
