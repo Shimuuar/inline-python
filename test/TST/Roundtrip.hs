@@ -1,5 +1,4 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE CPP                 #-}
 -- |
 module TST.Roundtrip (tests) where
 
@@ -27,9 +26,7 @@ import Data.ByteString             qualified as BS
 import Data.ByteString.Lazy        qualified as BL
 import Data.ByteString.Short       qualified as SBS
 import Data.Vector                 qualified as V
-#if MIN_VERSION_vector(0,13,2)
 import Data.Vector.Strict          qualified as VV
-#endif
 import Data.Vector.Storable        qualified as VS
 import Data.Vector.Primitive       qualified as VP
 import Data.Vector.Unboxed         qualified as VU
@@ -89,9 +86,7 @@ tests = testGroup "Roundtrip"
     , testRoundtrip @(VS.Vector Int)
     , testRoundtrip @(VP.Vector Int)
     , testRoundtrip @(VU.Vector Int)
-#if MIN_VERSION_vector(0,13,2)
---    , testRoundtrip @(VV.Vector Int)
-#endif
+    , testRoundtrip @(VV.Vector Int)
     , testRoundtrip @BS.ByteString
     , testRoundtrip @BL.ByteString
     , testRoundtrip @SBS.ShortByteString

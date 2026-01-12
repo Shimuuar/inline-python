@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP                      #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE MagicHash                #-}
 {-# LANGUAGE QuasiQuotes              #-}
@@ -35,9 +34,7 @@ import Data.Text.Lazy              qualified as TL
 import Data.Vector.Generic         qualified as VG
 import Data.Vector.Generic.Mutable qualified as MVG
 import Data.Vector                 qualified as V
-#if MIN_VERSION_vector(0,13,2)
 import Data.Vector.Strict          qualified as VV
-#endif
 import Data.Vector.Storable        qualified as VS
 import Data.Vector.Primitive       qualified as VP
 import Data.Vector.Unboxed         qualified as VU
@@ -323,6 +320,7 @@ instance FromPy Word32 where
 -- Integer's encoding. Sign is stored separately.
 
 
+-- | @since 0.2.1.0
 instance ToPy Integer where
   basicToPy (GHC.Num.Integer.IS i) = basicToPy (I# i)
   basicToPy (GHC.Num.Integer.IP p) = Py $ do
@@ -332,12 +330,14 @@ instance ToPy Integer where
     let n = fromIntegral (I# (sizeofByteArray# p)) :: CSize
     inline_py_Integer_ToPy p n 1
 
+-- | @since 0.2.1.0
 instance ToPy Natural where
   basicToPy (GHC.Num.Natural.NS i) = basicToPy (W# i)
   basicToPy (GHC.Num.Natural.NB p) = Py $ do
     let n = fromIntegral (I# (sizeofByteArray# p)) :: CSize
     inline_py_Integer_ToPy p n 0
 
+-- | @since 0.2.1.0
 instance FromPy Integer where
   basicFromPy p = runProgram $ do
     progIO [CU.exp| int { PyLong_Check($(PyObject *p)) } |] >>= \case
@@ -364,6 +364,7 @@ instance FromPy Integer where
       _ -> error "inline-py: FromPy Integer: INTERNAL ERROR"
     where
 
+-- | @since 0.2.1.0
 instance FromPy Natural where
   basicFromPy p = runProgram $ do
     progIO [CU.exp| int { PyLong_Check($(PyObject *p)) } |] >>= \case
@@ -632,11 +633,9 @@ instance (ToPy a, VP.Prim a) => ToPy (VP.Vector a) where
 -- | Converts to python's list
 instance (ToPy a, VU.Unbox a) => ToPy (VU.Vector a) where
   basicToPy = vectorToPy
-#if MIN_VERSION_vector(0,13,2)
 -- | Converts to python's list
 instance (ToPy a) => ToPy (VV.Vector a) where
   basicToPy = vectorToPy
-#endif
 
 -- | Accepts python's sequence (@len@ and indexing)
 instance FromPy a => FromPy (V.Vector a) where
@@ -650,11 +649,9 @@ instance (FromPy a, VP.Prim a) => FromPy (VP.Vector a) where
 -- | Accepts python's sequence (@len@ and indexing)
 instance (FromPy a, VU.Unbox a) => FromPy (VU.Vector a) where
   basicFromPy = vectorFromPy
-#if MIN_VERSION_vector(0,13,2)
 -- | Accepts python's sequence (@len@ and indexing)
 instance FromPy a => FromPy (VV.Vector a) where
   basicFromPy = vectorFromPy
-#endif
 
 
 -- | Fold over python's iterator. Function takes ownership over iterator.

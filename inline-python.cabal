@@ -67,7 +67,7 @@ Library
                    , text             >=2
                    , bytestring       >=0.11.2
                    , exceptions       >=0.10
-                   , vector           >=0.13
+                   , vector           >=0.13.2
   hs-source-dirs:    src
   include-dirs:      include
   c-sources:         cbits/python.c
@@ -98,7 +98,7 @@ library test
                   , tasty                >=1.2
                   , tasty-hunit          >=0.10
                   , tasty-quickcheck     >=0.10
-                  , quickcheck-instances >=0.3.32
+                  , quickcheck-instances >=0.3.33
                   , exceptions
                   , containers
                   , vector
