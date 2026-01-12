@@ -72,7 +72,7 @@ Library
   include-dirs:      include
   c-sources:         cbits/python.c
   cc-options:        -g -Wall
-  pkgconfig-depends: python3-embed >= 3.8
+  pkgconfig-depends: python3-embed >= 3.10
   --
   Exposed-modules:
     Python.Inline

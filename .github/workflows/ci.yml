@@ -24,7 +24,6 @@ jobs:
           - { cabal: "3.14", os: ubuntu-latest,  ghc: "9.10.2", python-version: "3.12" }
           - { cabal: "3.14", os: ubuntu-latest,  ghc: "9.12.2", python-version: "3.12" }
           # Scan over supported python versions
-          - { cabal: "3.14", os: ubuntu-latest,  ghc: "9.10.2", python-version: "3.9"  }
           - { cabal: "3.14", os: ubuntu-latest,  ghc: "9.10.2", python-version: "3.10" }
           - { cabal: "3.14", os: ubuntu-latest,  ghc: "9.10.2", python-version: "3.11" }
           - { cabal: "3.14", os: ubuntu-latest,  ghc: "9.10.2", python-version: "3.12" }
