@@ -1,5 +1,8 @@
-0.2.0.1 [XXX]
+0.2.1.0 [XXX]
 ----------------
+* Only Python>=3.10 is supported now. Earlier versions are not supported anymore.
+  Now they're tested on CI.
+
 * Documentation fixes
 
 0.2 [2025.05.04]
