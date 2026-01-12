@@ -6,6 +6,7 @@ import Data.ByteString      qualified as BS
 import Data.Set             qualified as Set
 import Data.Map.Strict      qualified as Map
 import Data.Complex         (Complex((:+)))
+import Numeric.Natural      (Natural)
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
@@ -71,6 +72,16 @@ tests = testGroup "ToPy"
                                          in runPy [py_| assert n_hs == -(2**k_hs) |]
       , testCase ("-2^"++show k++"+1") $ let n = negate $ 2^k + 1 :: Integer
                                          in runPy [py_|assert n_hs == -(2**k_hs + 1) |]
+      ]
+    | k <- [63,64,65,92,17,128,129,32100] :: [Int]
+    ]
+  , testGroup "Natural" $ concat
+    [ [ testCase (" 2^"++show k++"-1") $ let n = 2^k - 1          :: Natural
+                                         in runPy [py_| assert n_hs == 2**k_hs - 1 |]
+      , testCase (" 2^"++show k)       $ let n = 2^k              :: Natural
+                                         in runPy [py_| assert n_hs == 2**k_hs |]
+      , testCase (" 2^"++show k++"+1") $ let n = 2^k + 1          :: Natural
+                                         in runPy [py_| assert n_hs == 2**k_hs + 1 |]
       ]
     | k <- [63,64,65,92,17,128,129,32100] :: [Int]
     ]

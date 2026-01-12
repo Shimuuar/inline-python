@@ -12,12 +12,14 @@ import Data.Text       qualified as T
 import Data.Text.Lazy  qualified as TL
 import Data.Complex (Complex)
 import Foreign.C.Types
+import Numeric.Natural (Natural)
 
 import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.QuickCheck.Instances.Vector ()
 import Test.QuickCheck.Instances.ByteString ()
 import Test.QuickCheck.Instances.Text ()
+import Test.QuickCheck.Instances.Natural ()
 import Python.Inline
 import Python.Inline.QQ
 
@@ -48,6 +50,7 @@ tests = testGroup "Roundtrip"
     , testRoundtrip @Word64
     , testRoundtrip @Word
     , testRoundtrip @Integer
+    , testRoundtrip @Natural
       -- C wrappers
     , testRoundtrip @CChar
     , testRoundtrip @CSChar

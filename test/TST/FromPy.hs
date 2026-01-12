@@ -10,6 +10,7 @@ import Test.Tasty.HUnit
 import Python.Inline
 import Python.Inline.QQ
 import Data.Complex (Complex((:+)))
+import Numeric.Natural (Natural)
 
 import TST.Util
 
@@ -101,6 +102,15 @@ tests = testGroup "FromPy"
          , testCase ("-2^"++show k++"-1") $ eqI (negate $ 2^k - 1) [pye| -(2**k_hs - 1) |]
          , testCase ("-2^"++show k)       $ eqI (negate $ 2^k    ) [pye| -(2**k_hs)     |]
          , testCase ("-2^"++show k++"+1") $ eqI (negate $ 2^k + 1) [pye| -(2**k_hs + 1) |]
+         ]
+       | k <- [63,64,65,92,17,128,129,32100] :: [Int]
+       ]
+  , testGroup "Natural" $
+    let eqI = eq @Natural . Just
+    in concat
+       [ [ testCase (" 2^"++show k++"-1") $ eqI (2^k - 1) [pye| 2**k_hs - 1 |]
+         , testCase (" 2^"++show k)       $ eqI (2^k    ) [pye| 2**k_hs     |]
+         , testCase (" 2^"++show k++"+1") $ eqI (2^k + 1) [pye| 2**k_hs + 1 |]
          ]
        | k <- [63,64,65,92,17,128,129,32100] :: [Int]
        ]
