@@ -1,15 +1,15 @@
-0.2.1.0 [XXX]
+0.2.1.0 [2026.01.13]
 ----------------
 * `From/ToPy` instance for `Integer`&`Natural` added.
-* `vector-0.13.2` is required
-* Only Python>=3.10 is supported now. Earlier versions are not supported anymore.
-  Now they're tested on CI.
-* Documentation fixes
+* `vector-0.13.2` is required.
+* Python>=3.10 is supported. Boolean marshaling with python<3.12 is
+  fixed. Previously it caused crashes on counter decrement.
+* Documentation fixes.
 
 0.2 [2025.05.04]
 ----------------
 * `FromPy`/`ToPy` instances added for: `Complex`, both strict and lazy `Text` &
-  `ByteString`, `ShortByteString`, `Maybe a`
+  `ByteString`, `ShortByteString`, `Maybe a`.
 * Module `Python.Inline.Eval` added which support for eval/exec with user
   supplied global and local variables.
 * QuasiQuotes `Python.Inline.QQ.pycode` added for creating `PyQuote` data type.
