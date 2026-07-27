@@ -51,9 +51,10 @@ patchedConfHook (gpd, hbi) flags
                                  & L.extraLibs    %~ (++ libs)
                                  & L.extraLibDirs %~ (++ lib_dirs)
              _            -> lib
-       let lib' = (fmap . fmap) tweakLib (condLibrary  gpd)
-       let gpd' = gpd { condLibrary = lib' }
-       confHook simpleUserHooks (gpd', hbi) flags
+       confHook simpleUserHooks
+         ( gpd { condLibrary = (fmap . fmap) tweakLib (condLibrary  gpd) }
+         , hbi
+         ) flags
   | otherwise = do
       confHook simpleUserHooks (gpd, hbi) flags
 
