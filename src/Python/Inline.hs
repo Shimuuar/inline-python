@@ -45,6 +45,8 @@ module Python.Inline
   , Py
   , runPy
   , runPyInMain
+  , runPyAsync
+  , runPyAsyncEither
   , PyObject
   , PyError(..)
   , PyException(..)

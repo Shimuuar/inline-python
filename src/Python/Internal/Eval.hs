@@ -15,6 +15,8 @@ module Python.Internal.Eval
     -- * Evaluator
   , runPy
   , runPyInMain
+  , runPyAsync
+  , runPyAsyncEither
   , unsafeRunPy
     -- * GC-related
   , newPyObject
@@ -274,6 +276,13 @@ releaseLock tid = readTVar globalPyLock >>= \case
         []    -> LockUnlocked
         t':ts -> Locked t' ts
 
+ensureInit :: STM ()
+ensureInit = readTVar globalPyLock >>= \case
+  LockUninialized -> throwSTM PythonNotInitialized
+  LockFinalized   -> throwSTM PythonIsFinalized
+  LockedByGC      -> pure ()
+  LockUnlocked    -> pure ()
+  Locked{}        -> pure ()
 
 
 ----------------------------------------------------------------
@@ -517,7 +526,24 @@ runPyInMain py
       either throwM pure r
 
 
--- | Execute python action. This function is unsafe and should be only
+
+runPyAsyncEither :: Py a -> IO (STM (Either SomeException a))
+runPyAsyncEither py = do
+  atomically ensureInit
+  result <- newEmptyTMVarIO
+  -- FIXME: Should we rethrow only python expections? Sound sensible
+  _ <- forkOS $ do
+    a <- try $ unsafeRunPy $ ensureGIL py
+    atomically $ putTMVar result a
+  pure $ takeTMVar result
+
+runPyAsync :: Py a -> IO (STM a)
+runPyAsync py = do
+  res <- runPyAsyncEither py
+  return $ either throwSTM pure =<< res
+  
+
+  -- | Execute python action. This function is unsafe and should be only
 --   called in thread of interpreter.
 unsafeRunPy :: Py a -> IO a
 unsafeRunPy (Py io) = io
