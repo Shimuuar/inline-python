@@ -494,7 +494,7 @@ runPyInMain py
           pure ( atomically (releaseLock tid_main)
                , evalInOtherThread tid_main eval_lock
                )
-        -- If we513 can grab lock and main thread taken lock we're
+        -- If we can grab lock and main thread taken lock we're
         -- already executing on main thread. We can simply execute code
         Locked t ts
           | t /= tid
