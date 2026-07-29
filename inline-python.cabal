@@ -99,6 +99,7 @@ library test
                   , tasty                >=1.2
                   , tasty-hunit          >=0.10
                   , tasty-quickcheck     >=0.10
+                  , stm
                   , quickcheck-instances >=0.3.33
                   , exceptions
                   , containers
