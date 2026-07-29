@@ -15,9 +15,16 @@ module Python.Internal.Eval
     -- * Evaluator
   , runPy
   , runPyInMain
-  , runPyAsync
-  , runPyAsyncEither
   , unsafeRunPy
+    -- ** Async
+  , PyAsync
+  , PyAsyncCancelled(..)
+  , waitPy
+  , waitPyCatch
+  , cancelPy
+  , uninterruptibleCancelPy
+  , runPyAsync
+  , withPyAsync
     -- * GC-related
   , newPyObject
     -- * C-API wrappers
@@ -56,6 +63,7 @@ import Control.Monad.Trans.Cont
 import Data.Maybe
 import Data.Function
 import Data.ByteString.Unsafe    qualified as BS
+import Data.Word
 import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -525,29 +533,90 @@ runPyInMain py
                       takeMVar resp `onException` throwTo tid_main InterruptMain
       either throwM pure r
 
-
-
-runPyAsyncEither :: Py a -> IO (STM (Either SomeException a))
-runPyAsyncEither py = do
-  atomically ensureInit
-  result <- newEmptyTMVarIO
-  -- FIXME: Should we rethrow only python expections? Sound sensible
-  _ <- forkOS $ do
-    a <- try $ unsafeRunPy $ ensureGIL py
-    atomically $ putTMVar result a
-  pure $ takeTMVar result
-
-runPyAsync :: Py a -> IO (STM a)
-runPyAsync py = do
-  res <- runPyAsyncEither py
-  return $ either throwSTM pure =<< res
-  
-
-  -- | Execute python action. This function is unsafe and should be only
+-- | Execute python action. This function is unsafe and should be only
 --   called in thread of interpreter.
 unsafeRunPy :: Py a -> IO a
 unsafeRunPy (Py io) = io
 
+
+----------------------------------------------------------------
+-- Async running
+----------------------------------------------------------------
+
+-- | Exception thrown to a thread doing async python computation.
+data PyAsyncCancelled = PyAsyncCancelled
+  deriving (Show, Eq)
+
+instance Exception PyAsyncCancelled
+
+-- | Handle to asynchronous python computation spawned by
+--   'runPyAsync'. It's performed on separate OS thread. Use
+--   'wait'\/'waitCatch' to obtain computation result.
+data PyAsync a = PyAsync
+  { asyncTID   :: !ThreadId
+  , asyncPyTID :: !Word64
+  , asyncWait  :: STM (Either SomeException a)
+  }
+
+-- | Wait for result of asynchronous computation. If it threw an
+--   exception it will be rethrown by @wait@.
+waitPy :: PyAsync a -> STM a
+waitPy a = either throwSTM pure =<< a.asyncWait
+
+-- | Wait for result of asynchronous computation. Exception thrown by
+--   it will be returned as @Left@.
+waitPyCatch :: PyAsync a -> STM (Either SomeException a)
+waitPyCatch = (.asyncWait)
+
+-- | Cancel execution of asynchronous computation. Most likely thread
+--   will be executing some python so first it attempts to raise async
+--   exception in python code. Then it throws 'PyAsyncCancelled' in case
+--   it executes haskell code. This means thread could be terminate
+--   either with 'PyError' or 'PyAsyncCancelled'.
+--
+--   Note that python code generally is not written under assumption
+--   that it could be smitten with exception at an absolutely any
+--   moment.
+cancelPy :: PyAsync a -> IO ()
+cancelPy PyAsync{asyncTID=tid, asyncPyTID=py_tid}
+  | rtsSupportsBoundThreads = runInBoundThread go
+  | otherwise               = go
+  where
+    go = do
+      [C.block| void {
+        int gil = PyGILState_Ensure();
+        int n   = PyThreadState_SetAsyncExc($(uint64_t py_tid), inline_py_AsyncError());
+        printf("My job is done (%d) tid=(%ld)\n", n, $(uint64_t py_tid));
+        PyGILState_Release(gil);
+        }|]
+      throwTo tid PyAsyncCancelled
+
+-- | Variant of 'cancel' which isn't interruptible.
+uninterruptibleCancelPy :: PyAsync a -> IO ()
+uninterruptibleCancelPy = uninterruptibleMask_ . cancelPy
+
+-- | Create new OS thread and execute python code on it.
+runPyAsync :: Py a -> IO (PyAsync a)
+runPyAsync py = do
+  atomically ensureInit
+  result    <- newEmptyTMVarIO
+  py_tid_mv <- newEmptyMVar
+  tid    <- forkOS $ do
+    -- Obtain python thread ID
+    putMVar py_tid_mv =<< [CU.exp| uint64_t { PyThread_get_thread_ident() } |]
+    a <- try $ unsafeRunPy $ ensureGIL py
+    atomically $ putTMVar result a
+  py_tid <- takeMVar py_tid_mv
+  pure PyAsync
+    { asyncTID   = tid
+    , asyncPyTID = py_tid
+    , asyncWait  = takeTMVar result
+    }
+
+-- | Create new OS thread and execute python code on it. Will use
+--   'uninterruptibleCancel' after callback finishes execution.
+withPyAsync :: Py a -> (PyAsync a -> IO b) -> IO b
+withPyAsync py = bracket (runPyAsync py) uninterruptibleCancelPy
 
 
 ----------------------------------------------------------------

@@ -210,3 +210,14 @@ void inline_py_Integer_FromPy(
     PyLong_AsNativeBytes(p, buf, size, -1);
 #endif
 }
+
+
+
+static PyObject* AsyncError = 0;
+
+PyObject* inline_py_AsyncError() {
+    if( AsyncError == 0 ) {
+        AsyncError = PyErr_NewException("inline_py.AsyncError", PyExc_BaseException, 0);
+    }
+    return AsyncError;
+}

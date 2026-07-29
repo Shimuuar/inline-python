@@ -80,6 +80,7 @@ Library
     Python.Inline.QQ
     Python.Inline.Eval
     Python.Inline.Types
+    Python.Inline.Async
   Other-modules:
     Python.Internal.CAPI
     Python.Internal.Eval
