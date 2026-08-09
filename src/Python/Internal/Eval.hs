@@ -110,30 +110,27 @@ C.include "<inline-python.h>"
 --
 -- One could think that running python code in bound threads and
 -- making sure that GIL is held would suffice. It doesn't. Doing so
--- would quickly results in deadlock. Exact reason for that is not
+-- quickly results in deadlock. Exact reason for that is not
 -- understood.
 --
 -- Another problem is GHC may schedule two threads each running python
--- code on same capability. They won't have any problems taking GIL
--- and will run concurrently stepping on each other's toes.
+-- code on same capability. It seems very likely that they'll step on
+-- each others' toes.
 --
--- Only way to solve this problem is to introduce another lock on
--- haskell side. It's visible to haskell RTS so we won't get deadlocks
--- and it makes sure that only one haskell thread interacts with
--- python at a time.
---
---
+-- Current solution is to protect execution of python code with global
+-- lock. Since it's visible to haskell RTS we don't get deadlocks.
+-- This also means we can't execute python code concurrently.
+
+
+
+-- NOTE: [Main thread]
+-- ~~~~~~~~~~~~~~~~~~~
 --
 -- Also python designate thread in which python interpreter was
 -- initialized as a main thread. It has special status for example
 -- some libraries may run only in main thread (e.g. tkinter). But if
 -- we don't take special precautions we won't know which thread it
 -- is.
---
---
---
--- There's of course question how well python threading interacts with
--- haskell. No one knows, probably it won't work well.
 
 
 
