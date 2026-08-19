@@ -27,7 +27,7 @@ C.include "<inline-python.h>"
 
 
 decref :: Ptr PyObject -> Py ()
-decref p = Py [CU.exp| void { Py_DECREF($(PyObject* p)) } |]
+decref p = Py [C.exp| void { Py_DECREF($(PyObject* p)) } |]
 
 incref :: Ptr PyObject -> Py ()
 incref p = Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
@@ -39,7 +39,7 @@ basicNewSet :: Py (Ptr PyObject)
 basicNewSet = Py [CU.exp| PyObject* { PySet_New(NULL) } |]
 
 basicGetIter :: Ptr PyObject -> Py (Ptr PyObject)
-basicGetIter p = Py [CU.exp| PyObject* { PyObject_GetIter( $(PyObject *p)) } |]
+basicGetIter p = Py [C.exp| PyObject* { PyObject_GetIter( $(PyObject *p)) } |]
 
 basicIterNext :: Ptr PyObject -> Py (Ptr PyObject)
 basicIterNext p = Py [C.exp| PyObject* { PyIter_Next($(PyObject* p)) } |]
@@ -50,7 +50,7 @@ basicCallKwdOnly
   :: Ptr PyObject -- ^ Function object
   -> Ptr PyObject -- ^ Keywords. Must be dictionary
   -> Py (Ptr PyObject)
-basicCallKwdOnly fun kwd = Py [CU.block| PyObject* {
+basicCallKwdOnly fun kwd = Py [C.block| PyObject* {
   PyObject* args = PyTuple_Pack(0);
   PyObject* res  = PyObject_Call($(PyObject *fun), args, $(PyObject *kwd));
   Py_DECREF(args);

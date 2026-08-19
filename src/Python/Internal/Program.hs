@@ -131,14 +131,14 @@ withPyCStringLen = coerce (withCStringLen @r)
 --   string. Returns Nothing if exception was raisede
 pyobjectStrAsHask :: Ptr PyObject -> Py (Maybe String)
 pyobjectStrAsHask p_obj = runProgram $ do
-  p_str <- takeOwnership <=< abortOnNull Nothing $ Py [CU.block| PyObject* {
+  p_str <- takeOwnership <=< abortOnNull Nothing $ Py [C.block| PyObject* {
     PyObject *s = PyObject_Str($(PyObject *p_obj));
     if( PyErr_Occurred() ) {
         PyErr_Clear();
     }
     return s;
     } |]
-  c_str <- abortOnNull Nothing $ Py [CU.block| const char* {
+  c_str <- abortOnNull Nothing $ Py [C.block| const char* {
     const char* s = PyUnicode_AsUTF8($(PyObject *p_str));
     if( PyErr_Occurred() ) {
         PyErr_Clear();

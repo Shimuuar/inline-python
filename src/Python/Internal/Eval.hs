@@ -566,7 +566,7 @@ singleThreadedDecrefCG p = readTVarIO globalPyLock >>= \case
   LockUnlocked    -> gcDecref p
 
 gcDecref :: Ptr PyObject -> IO ()
-gcDecref p = [CU.block| void {
+gcDecref p = [C.block| void {
   PyGILState_STATE st = PyGILState_Ensure();
   Py_XDECREF( $(PyObject* p) );
   PyGILState_Release(st);
@@ -583,7 +583,7 @@ ensureGIL action = do
   -- NOTE: We're cheating here and looking behind the veil.
   --       PyGILState_STATE is defined as enum. Let hope it will stay
   --       this way.
-  gil_state <- Py [CU.exp| int { PyGILState_Ensure() } |]
+  gil_state <- Py [C.exp| int { PyGILState_Ensure() } |]
   action `finally` Py [CU.exp| void { PyGILState_Release($(int gil_state)) } |]
 
 -- | Drop GIL temporarily
@@ -594,7 +594,7 @@ dropGIL action = do
   --       this way.
   st <- Py [CU.exp| PyThreadState* { PyEval_SaveThread() } |]
   Py $ interruptible action
-        `finally` [CU.exp| void { PyEval_RestoreThread($(PyThreadState *st)) } |]
+        `finally` [C.exp| void { PyEval_RestoreThread($(PyThreadState *st)) } |]
 
 
 ----------------------------------------------------------------
@@ -606,7 +606,7 @@ dropGIL action = do
 convertHaskell2Py :: SomeException -> Py (Ptr PyObject)
 convertHaskell2Py err = Py $ do
   withCString ("Haskell exception: "++show err) $ \p_err -> do
-    [CU.block| PyObject* {
+    [C.block| PyObject* {
       PyErr_SetString(PyExc_RuntimeError, $(char *p_err));
       return NULL;
       } |]
@@ -696,7 +696,7 @@ data Main = Main
 
 instance Namespace Main where
   basicNamespaceDict _ =
-    throwOnNULL =<< Py [CU.block| PyObject* {
+    throwOnNULL =<< Py [C.block| PyObject* {
       PyObject* main_module = PyImport_AddModule("__main__");
       if( PyErr_Occurred() )
           return NULL;
@@ -743,7 +743,7 @@ newtype ModulePtr = ModulePtr (Ptr PyObject)
 
 instance Namespace ModulePtr where
   basicNamespaceDict (ModulePtr p) = do
-    throwOnNULL =<< Py [CU.block| PyObject* {
+    throwOnNULL =<< Py [C.block| PyObject* {
       PyObject* dict = PyModule_GetDict($(PyObject* p));
       Py_XINCREF(dict);
       return dict;
@@ -831,7 +831,7 @@ unsafeWithCode (Code bs) = Program $ ContT $ \fun ->
 ----------------------------------------------------------------
 
 debugPrintPy :: Ptr PyObject -> Py ()
-debugPrintPy p = Py [CU.block| void {
+debugPrintPy p = Py [C.block| void {
   PyObject_Print($(PyObject *p), stdout, 0);
   printf(" [REF=%li]\n", Py_REFCNT($(PyObject *p)) );
   } |]
