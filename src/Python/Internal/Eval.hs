@@ -551,7 +551,7 @@ instance Exception PyAsyncCancelled
 --   'wait'\/'waitCatch' to obtain computation result.
 data PyAsync a = PyAsync
   { asyncTID   :: !ThreadId
-  , asyncPyTID :: !Word64
+  , asyncPyTID :: !(IO Word64)
   , asyncWait  :: STM (Either SomeException a)
   }
 
@@ -575,18 +575,33 @@ waitPyCatch = (.asyncWait)
 --   that it could be smitten with exception at an absolutely any
 --   moment.
 cancelPy :: PyAsync a -> IO ()
-cancelPy PyAsync{asyncTID=tid, asyncPyTID=py_tid}
-  | rtsSupportsBoundThreads = runInBoundThread go
-  | otherwise               = go
+cancelPy PyAsync{asyncTID=tid, asyncPyTID}
+  = runInBoundThread go
   where
     go = do
-      [C.block| void {
-        int gil = PyGILState_Ensure();
-        int n   = PyThreadState_SetAsyncExc($(uint64_t py_tid), inline_py_AsyncError());
-        printf("My job is done (%d) tid=(%ld)\n", n, $(uint64_t py_tid));
-        PyGILState_Release(gil);
-        }|]
+      -- As long as thread is running python code it couldn't be
+      -- interrupted by haskell exception so we spawn separate thread
+      -- which attempts to repeatedly interrupt python evaluation.
+      --
+      -- PyThreadState_SetAsyncExc won't do anything if thread isn't
+      -- running python at the moment so we attempt to cancel python
+      -- repeatedly until we get
+      py_tid  <- asyncPyTID
+      mv_done <- newEmptyMVar
+      -- Interrupting python
+      _ <- forkIO $ runInBoundThread $ fix $ \loop -> do
+        [C.block| void {
+          int gil = PyGILState_Ensure();
+          int n   = PyThreadState_SetAsyncExc($(uint64_t py_tid), inline_py_AsyncError());
+          printf("My job is done (%d) tid=(%ld)\n", n, $(uint64_t py_tid));
+          PyGILState_Release(gil);
+          }|]
+        tryReadMVar mv_done >>= \case
+          Just () -> return ()
+          Nothing -> threadDelay 50 >> loop -- Avoid hammering interrupt too hard
       throwTo tid PyAsyncCancelled
+      putMVar mv_done ()
+
 
 -- | Variant of 'cancel' which isn't interruptible.
 uninterruptibleCancelPy :: PyAsync a -> IO ()
@@ -598,15 +613,14 @@ runPyAsync py = do
   atomically ensureInit
   result    <- newEmptyTMVarIO
   py_tid_mv <- newEmptyMVar
-  tid    <- forkOS $ do
-    -- Obtain python thread ID
-    putMVar py_tid_mv =<< [CU.exp| uint64_t { PyThread_get_thread_ident() } |]
+  tid    <- forkOS $ mask_ $ do
+    -- Obtain python thread ID.
+    putMVar py_tid_mv =<< [C.exp| uint64_t { PyThread_get_thread_ident() } |]
     a <- try $ unsafeRunPy $ ensureGIL py
     atomically $ putTMVar result a
-  py_tid <- takeMVar py_tid_mv
   pure PyAsync
     { asyncTID   = tid
-    , asyncPyTID = py_tid
+    , asyncPyTID = readMVar py_tid_mv
     , asyncWait  = takeTMVar result
     }
 
