@@ -357,7 +357,7 @@ instance FromPy Integer where
       -1 -> do
         neg <- takeOwnership
            <=< progPy
-             $ throwOnNULL =<< Py [CU.exp| PyObject* { PyNumber_Negative( $(PyObject *p) ) } |]
+             $ throwOnNULL =<< Py [C.exp| PyObject* { PyNumber_Negative( $(PyObject *p) ) } |]
         BA.ByteArray ba <- progIO $ decodePositiveInteger neg
         pure $ GHC.Num.Integer.IN ba
       -- Unreachable
@@ -449,7 +449,7 @@ instance ToPy Bool where
 -- | Uses python's truthiness conventions
 instance FromPy Bool where
   basicFromPy p = do
-    r <- Py [CU.exp| int { PyObject_IsTrue($(PyObject* p)) } |]
+    r <- Py [C.exp| int { PyObject_IsTrue($(PyObject* p)) } |]
     checkThrowPyError
     pure $! r /= 0
 
@@ -465,7 +465,7 @@ instance (FromPy a, FromPy b) => FromPy (a,b) where
   basicFromPy p_tup = runProgram $ do
     -- Unpack 2-tuple.
     p_args    <- withPyAllocaArray 2
-    unpack_ok <- progIO [CU.exp| int {
+    unpack_ok <- progIO [C.exp| int {
       inline_py_unpack_iterable($(PyObject *p_tup), 2, $(PyObject **p_args))
       }|]
     progPy $ do checkThrowPyError
@@ -490,7 +490,7 @@ instance (FromPy a, FromPy b, FromPy c) => FromPy (a,b,c) where
   basicFromPy p_tup = runProgram $ do
     -- Unpack 3-tuple.
     p_args    <- withPyAllocaArray 3
-    unpack_ok <- progIO [CU.exp| int {
+    unpack_ok <- progIO [C.exp| int {
       inline_py_unpack_iterable($(PyObject *p_tup), 3, $(PyObject **p_args))
       }|]
     progPy $ do checkThrowPyError
@@ -518,7 +518,7 @@ instance (FromPy a, FromPy b, FromPy c, FromPy d) => FromPy (a,b,c,d) where
   basicFromPy p_tup = runProgram $ do
     -- Unpack 3-tuple.
     p_args    <- withPyAllocaArray 4
-    unpack_ok <- progIO [CU.exp| int {
+    unpack_ok <- progIO [C.exp| int {
       inline_py_unpack_iterable($(PyObject *p_tup), 4, $(PyObject **p_args))
       }|]
     progPy $ do checkThrowPyError
@@ -558,7 +558,7 @@ instance (ToPy a) => ToPy [a] where
 -- | Will accept any iterable
 instance (FromPy a) => FromPy [a] where
   basicFromPy p_list = do
-    p_iter <- Py [CU.block| PyObject* {
+    p_iter <- Py [C.block| PyObject* {
       PyObject* iter = PyObject_GetIter( $(PyObject *p_list) );
       if( PyErr_Occurred() ) {
           PyErr_Clear();
@@ -604,7 +604,7 @@ instance (ToPy k, ToPy v, Ord k) => ToPy (Map.Map k v) where
             NULL -> mustThrowPyError
             p_k  -> flip finally (decref p_k) $ basicToPy v >>= \case
               NULL -> mustThrowPyError
-              p_v  -> Py [CU.exp| int { PyDict_SetItem($(PyObject *p_dict), $(PyObject* p_k), $(PyObject *p_v)) }|] >>= \case
+              p_v  -> Py [C.exp| int { PyDict_SetItem($(PyObject *p_dict), $(PyObject* p_k), $(PyObject *p_v)) }|] >>= \case
                 0 -> loop xs
                 _ -> nullPtr <$ decref p_v
       loop $ Map.toList dct
@@ -615,7 +615,7 @@ instance (FromPy k, FromPy v, Ord k) => FromPy (Map.Map k v) where
                  throwM BadPyType
     p_iter -> foldPyIterable p_iter
       (\m p -> do k <- basicFromPy p
-                  v <- Py [CU.exp| PyObject* { PyDict_GetItem($(PyObject* p_dct), $(PyObject *p)) }|] >>= \case
+                  v <- Py [C.exp| PyObject* { PyDict_GetItem($(PyObject* p_dct), $(PyObject *p)) }|] >>= \case
                     NULL -> throwM BadPyType
                     p_v  -> basicFromPy p_v
                   pure $! Map.insert k v m)
@@ -671,14 +671,14 @@ foldPyIterable p_iter step a0
 vectorFromPy :: (VG.Vector v a, FromPy a) => Ptr PyObject -> Py (v a)
 {-# INLINE vectorFromPy #-}
 vectorFromPy p_seq = do
-  len <- Py [CU.exp| long long { PySequence_Size($(PyObject* p_seq)) } |]
+  len <- Py [C.exp| long long { PySequence_Size($(PyObject* p_seq)) } |]
   when (len < 0) $ do
     Py [C.exp| void { PyErr_Clear() } |]
     throwM BadPyType
   -- Read data into vector
   buf <- MVG.generateM (fromIntegral len) $ \i -> do
     let i_c = fromIntegral i
-    Py [CU.exp| PyObject* { PySequence_GetItem($(PyObject* p_seq), $(long long i_c)) } |] >>= \case
+    Py [C.exp| PyObject* { PySequence_GetItem($(PyObject* p_seq), $(long long i_c)) } |] >>= \case
       NULL -> mustThrowPyError
       p    -> basicFromPy p `finally` decref p
   VG.unsafeFreeze buf
@@ -940,7 +940,7 @@ loadArg p (fromIntegral -> i) (fromIntegral -> tot) = Program $ ContT $ \success
     Left  OutOfRange -> oops
     Left  e          -> throwM e
     where
-      oops = Py [CU.block| PyObject* {
+      oops = Py [C.block| PyObject* {
         char err[256];
         sprintf(err, "Failed to decode function argument %i of %li", $(int i)+1, $(int64_t tot));
         PyErr_SetString(PyExc_TypeError, err);
@@ -959,7 +959,7 @@ loadArgFastcall p_arr i tot = do
   loadArg p i tot
 
 raiseBadNArgs :: CInt -> Int64 -> Py (Ptr PyObject)
-raiseBadNArgs expected got = Py [CU.block| PyObject* {
+raiseBadNArgs expected got = Py [C.block| PyObject* {
   char err[256];
   sprintf(err, "Function takes exactly %i arguments (%li given)", $(int expected), $(int64_t got));
   PyErr_SetString(PyExc_TypeError, err);
