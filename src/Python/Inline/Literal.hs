@@ -684,6 +684,7 @@ vectorFromPy p_seq = do
   VG.unsafeFreeze buf
 
 vectorToPy :: (VG.Vector v a, ToPy a) => v a -> Py (Ptr PyObject)
+{-# INLINE vectorToPy #-}
 vectorToPy vec = runProgram $ do
   p_list <- takeOwnership =<< checkNull (Py [CU.exp| PyObject* { PyList_New($(long long n_c)) } |])
   progPy $ do
