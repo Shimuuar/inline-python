@@ -300,8 +300,8 @@ ensureInit = readTVar globalPyLock >>= \case
 initializePython :: IO ()
 -- See NOTE: [Python and threading]
 initializePython = [CU.exp| int { Py_IsInitialized() } |] >>= \case
-  0 | rtsSupportsBoundThreads -> runInBoundThread $ doInializePython
-    | otherwise               -> doInializePython
+  0 | rtsSupportsBoundThreads -> runInBoundThread $ doInitializePython
+    | otherwise               -> doInitializePython
   _ -> pure ()
 
 -- | Destroy python interpreter.
@@ -340,8 +340,8 @@ withPython :: IO a -> IO a
 withPython = bracket_ initializePython finalizePython
 
 
-doInializePython :: IO ()
-doInializePython = do
+doInitializePython :: IO ()
+doInitializePython = do
   -- First we need to grab global python lock on haskell side
   join $ atomically $ do
     readTVar globalPyState >>= \case
@@ -374,7 +374,7 @@ doInializePython = do
                 fini $ RunningN gc_chan lock_eval tid_main tid_gc
             -- Nothing special is needed on single threaded RTS
             | otherwise -> do
-                doInializePythonIO >>= \case
+                doInitializePythonIO >>= \case
                   True  -> pure ()
                   False -> throwM PyInitializationFailed
                 fini Running1
@@ -383,7 +383,7 @@ doInializePython = do
 -- This action is executed on python's main thread
 mainThread :: MVar Bool -> MVar EvalReq -> IO ()
 mainThread lock_init lock_eval = do
-  r_init <- doInializePythonIO
+  r_init <- doInitializePythonIO
   putMVar lock_init r_init
   case r_init of
     False -> pure ()
@@ -402,8 +402,8 @@ mainThread lock_init lock_eval = do
         HereWeGoAgain -> loop
 
 
-doInializePythonIO :: IO Bool
-doInializePythonIO = do
+doInitializePythonIO :: IO Bool
+doInitializePythonIO = do
   -- FIXME: I'd like more direct access to argv
   argv0 <- getProgName
   argv  <- getArgs
