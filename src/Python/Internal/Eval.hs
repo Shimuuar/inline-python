@@ -729,7 +729,18 @@ convertPy2Haskell = runProgram $ do
        PyErr_Fetch(p, p+1, p+2);
        }|]
     p_type  <- peekElemOff p_errors 0
-    p_value <- peekElemOff p_errors 1
+    -- NOTE: When we set exception using PyThreadState_SetAsyncExc
+    --       this field remains NULL on python<=3.11. In this case we
+    --       assume it's our AsyncError:
+    p_value <- peekElemOff p_errors 1 >>= \case
+      NULL -> [CU.block| PyObject* {
+        PyObject *err_class = inline_py_AsyncError();
+        PyObject *tuple     = PyTuple_New(0);
+        PyObject *err       = PyObject_Call(err_class, tuple, NULL);
+        Py_DECREF(tuple);
+        return err;
+        } |]
+      p    -> pure p
     -- Traceback is not used ATM
     pure (p_type,p_value)
   -- Convert exception type and value to strings.
