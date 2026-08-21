@@ -24,7 +24,9 @@ tests = testGroup "Run python"
   , testCase "Nested runPyInMain" $ runPyInMain $ liftIO $ runPyInMain $ pure ()
   , testCase "runPyInMain" $ runPyInMain $ [py_|
       import threading
-      assert threading.main_thread() == threading.current_thread()
+      tid_main = threading.main_thread()
+      tid_our  = threading.current_thread()
+      assert tid_main == tid_our, f"TID[main]={tid_main}, TID[our]={tid_our}"
       |]
   , testCase "Python exceptions are converted (py)"   $ runPy      $ throwsPy    [py_| 1 / 0 |]
   , testCase "Python exceptions are converted (std)"  $ throwsPyIO $ runPy       [py_| 1 / 0 |]
