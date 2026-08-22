@@ -552,6 +552,7 @@ instance Exception PyAsyncCancelled
 data PyAsync a = PyAsync
   { asyncTID   :: !ThreadId
   , asyncPyTID :: !(IO Word64)
+  , asyncAlive :: !(MVar Bool)
   , asyncWait  :: STM (Either SomeException a)
   }
 
@@ -575,8 +576,8 @@ waitPyCatch = (.asyncWait)
 --   that it could be smitten with exception at an absolutely any
 --   moment.
 cancelPy :: PyAsync a -> IO ()
-cancelPy PyAsync{asyncTID=tid, asyncPyTID}
-  = runInBoundThread go
+cancelPy PyAsync{asyncTID=tid, asyncPyTID, asyncAlive}
+  = go
   where
     go = do
       -- As long as thread is running python code it couldn't be
@@ -587,20 +588,21 @@ cancelPy PyAsync{asyncTID=tid, asyncPyTID}
       -- running python at the moment so we attempt to cancel python
       -- repeatedly until we get
       py_tid  <- asyncPyTID
-      mv_done <- newEmptyMVar
       -- Interrupting python
       _ <- forkIO $ runInBoundThread $ fix $ \loop -> do
-        [C.block| void {
-          int gil = PyGILState_Ensure();
-          int n   = PyThreadState_SetAsyncExc($(uint64_t py_tid), inline_py_AsyncError());
-          printf("My job is done (%d) tid=(%ld)\n", n, $(uint64_t py_tid));
-          PyGILState_Release(gil);
-          }|]
-        tryReadMVar mv_done >>= \case
-          Just () -> return ()
-          Nothing -> threadDelay 50 >> loop -- Avoid hammering interrupt too hard
+        join $ withMVar asyncAlive $ \case
+          False -> return $ return ()
+          True  -> do
+            [C.block| void {
+              int gil = PyGILState_Ensure();
+              int n   = PyThreadState_SetAsyncExc($(uint64_t py_tid), inline_py_AsyncError());
+              printf("My job is done (%d) tid=(%ld)\n", n, $(uint64_t py_tid));
+              PyGILState_Release(gil);
+              }|]
+            return $ do
+              threadDelay 50 -- Avoid hammering interrupt too hard
+              loop
       throwTo tid PyAsyncCancelled
-      putMVar mv_done ()
 
 
 -- | Variant of 'cancel' which isn't interruptible.
@@ -613,15 +615,17 @@ runPyAsync py = do
   atomically ensureInit
   result    <- newEmptyTMVarIO
   py_tid_mv <- newEmptyMVar
-  tid    <- forkOS $ mask_ $ do
-    -- Obtain python thread ID.
-    putMVar py_tid_mv =<< [C.exp| uint64_t { PyThread_get_thread_ident() } |]
-    a <- try $ unsafeRunPy $ ensureGIL py
-    atomically $ putTMVar result a
+  alive     <- newMVar True
+  tid    <- forkOS $ mask_ $
+    (do putMVar py_tid_mv =<< [C.exp| uint64_t { PyThread_get_thread_ident() } |]
+        a <- try $ unsafeRunPy $ ensureGIL py
+        atomically $ putTMVar result a
+    ) `finally` uninterruptibleMask_ (modifyMVar_ alive (\_ -> pure False))
   pure PyAsync
     { asyncTID   = tid
     , asyncPyTID = readMVar py_tid_mv
     , asyncWait  = takeTMVar result
+    , asyncAlive = alive
     }
 
 -- | Create new OS thread and execute python code on it. Will use
