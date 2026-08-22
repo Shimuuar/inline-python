@@ -81,3 +81,12 @@ void inline_py_Integer_FromPy(
     void*     buf,
     size_t    size
 );
+
+
+
+// ================================================================
+// Async exceptions
+// ================================================================
+
+// Obtain class for async exception
+PyObject* inline_py_AsyncError();

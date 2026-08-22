@@ -80,6 +80,7 @@ Library
     Python.Inline.QQ
     Python.Inline.Eval
     Python.Inline.Types
+    Python.Inline.Async
   Other-modules:
     Python.Internal.CAPI
     Python.Internal.Eval
@@ -98,6 +99,7 @@ library test
                   , tasty                >=1.2
                   , tasty-hunit          >=0.10
                   , tasty-quickcheck     >=0.10
+                  , stm
                   , quickcheck-instances >=0.3.33
                   , exceptions
                   , containers

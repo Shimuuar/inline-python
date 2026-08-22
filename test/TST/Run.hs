@@ -3,6 +3,7 @@
 module TST.Run(tests) where
 
 import Control.Concurrent
+import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
@@ -12,6 +13,7 @@ import Test.Tasty.HUnit
 import Python.Inline
 import Python.Inline.QQ
 import Python.Inline.Eval
+import Python.Inline.Async
 import TST.Util
 
 tests :: TestTree
@@ -22,7 +24,9 @@ tests = testGroup "Run python"
   , testCase "Nested runPyInMain" $ runPyInMain $ liftIO $ runPyInMain $ pure ()
   , testCase "runPyInMain" $ runPyInMain $ [py_|
       import threading
-      assert threading.main_thread() == threading.current_thread()
+      tid_main = threading.main_thread()
+      tid_our  = threading.current_thread()
+      assert tid_main == tid_our, f"TID[main]={tid_main}, TID[our]={tid_our}"
       |]
   , testCase "Python exceptions are converted (py)"   $ runPy      $ throwsPy    [py_| 1 / 0 |]
   , testCase "Python exceptions are converted (std)"  $ throwsPyIO $ runPy       [py_| 1 / 0 |]
@@ -164,8 +168,46 @@ tests = testGroup "Run python"
         assert m_hs.a == 12
         assert m_hs.b == 'asd'
         |]
+  , testGroup "async" $ guardThreaded
+    [ -- We can run async computation at all
+      testCase "runPyAsync" $ do
+        runPy [pymain| dct = {} |]
+        a <- runPyAsync $ [py_| dct[1] = 100 |]
+        _ <- atomically $ waitPy a
+        n <- runPy $ fromPy =<< [pye| dct[1] |]
+        assertEqual "x" (Just (100::Int)) n
+        runPy [pymain| del dct |]
+    , -- Cancellation of python code
+      testCase "cancelPy [python]" $ do
+        a <- runPyAsync $ forever $ [py_|
+          import time
+          while True:
+              time.sleep(1e-3)
+          |]
+        d <- registerDelay 100_000
+        cancelPy a
+        _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
+                                                      True  -> error "Timeout"
+                                                      False -> retry
+        return ()
+    -- , -- Cancellation of haskell code
+    --   testCase "cancelPy [haskell]" $ do
+    --     a <- runPyAsync $ do
+    --       liftIO $ forever $ threadDelay 1_000_000
+    --     d <- registerDelay 100_000
+    --     cancelPy a
+    --     _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
+    --                                                   True  -> error "Timeout"
+    --                                                   False -> retry
+    --     return ()
+    ]
   ]
 
 data Stop = Stop
   deriving stock    Show
   deriving anyclass Exception
+
+guardThreaded :: [TestTree] -> [TestTree]
+guardThreaded ts
+  | rtsSupportsBoundThreads = ts
+  | otherwise               = []
