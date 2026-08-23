@@ -105,6 +105,7 @@ import Python.Internal.Eval
 --
 -- Here's list of common problems and solutions and workarounds.
 --
+--
 -- 1. __@inline-python@ cannot find libraries__
 --
 -- @inline-python@ may look for modules in wrong place. Set
@@ -112,7 +113,23 @@ import Python.Internal.Eval
 -- right way.
 --
 --
--- 2. __Linker error in GHCi__
+-- 2. __Picking correct python interpreter__
+--
+-- Python's version @inline-python@ uses is determined by @libpython3@
+-- it's linked with. This is decided when package is build. Normally
+-- @pkg-config@ is used and this means using whatever distribution is
+-- shipping. It's also possible to use @python3-config@ program by
+-- specifying manual cabal flag @-fpython3-config@.
+--
+-- If it's desired that @inline-python@ should use python installed by
+-- conda\/uv\/etc @inline-python@ should be built in environment where
+-- desired python version is active and use @-fpython3-config@ flag.
+-- This could be done by adding following to cabal.project:
+--
+-- > constraints: inline-python -fpython3-config
+--
+--
+-- 3. __Linker error in GHCi__
 --
 -- Attempting to import library using C extensions from ghci may
 -- result in linker failing to find symbols from @libpython@ like
