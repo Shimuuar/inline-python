@@ -120,10 +120,6 @@ newtype Py a = Py (IO a)
 pyIO :: IO a -> Py a
 pyIO = Py
 
--- | Removes exception masking
-instance MonadIO Py where
-  liftIO = Py . interruptible
-
 instance PrimMonad Py where
   type PrimState Py = RealWorld
   primitive = Py . primitive

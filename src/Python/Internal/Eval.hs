@@ -2,6 +2,7 @@
 {-# LANGUAGE QuasiQuotes               #-}
 {-# LANGUAGE RecordWildCards           #-}
 {-# LANGUAGE TemplateHaskell           #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 -- |
 -- Evaluation of python expressions.
 module Python.Internal.Eval
@@ -734,6 +735,10 @@ dropGIL action = do
   Py $ interruptible action
         `finally` [C.exp| void { PyEval_RestoreThread($(PyThreadState *st)) } |]
 
+
+-- | Removes exception masking and releases GIL temporarily
+instance MonadIO Py where
+  liftIO = dropGIL . interruptible
 
 ----------------------------------------------------------------
 -- Conversion of exceptions
