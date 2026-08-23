@@ -38,7 +38,6 @@ import Foreign.C.Types
 import Foreign.Storable
 
 import Language.C.Inline          qualified as C
-import Language.C.Inline.Unsafe   qualified as CU
 
 import Python.Internal.Types
 import Python.Internal.Util

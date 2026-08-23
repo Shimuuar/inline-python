@@ -11,7 +11,6 @@ module Python.Internal.EvalQQ
 
 import Control.Monad.IO.Class
 import Control.Monad.Catch
-import Control.Monad.Trans.Cont (ContT(..))
 import Data.Bits
 import Data.Char
 import Data.List                 (intercalate)
