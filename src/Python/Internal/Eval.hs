@@ -108,11 +108,6 @@ C.include "<inline-python.h>"
 -- implement N-M threading and schedules N green thread on M OS
 -- threads as it see fit.
 --
--- One could think that running python code in bound threads and
--- making sure that GIL is held would suffice. It doesn't. Doing so
--- quickly results in deadlock. Exact reason for that is not
--- understood.
---
 -- Another problem is GHC may schedule two threads each running python
 -- code on same capability. It seems very likely that they'll step on
 -- each others' toes.
@@ -120,6 +115,9 @@ C.include "<inline-python.h>"
 -- Current solution is to protect execution of python code with global
 -- lock. Since it's visible to haskell RTS we don't get deadlocks.
 -- This also means we can't execute python code concurrently.
+--
+-- There's support for running python code concurrently but it's very
+-- experimental. See NOTE [Py Async] for details
 
 
 
@@ -540,6 +538,38 @@ unsafeRunPy (Py io) = io
 -- Async running
 ----------------------------------------------------------------
 
+-- NOTE: [Py Async]
+-- ~~~~~~~~~~~~~~~~
+--
+-- Interaction with concurrent python in multithreaded environments
+-- stays on rather shaky foundations. I'm not sure that RTS won't
+-- schedule regular threads on forkOS'd thread and they won't cause
+-- problems there.
+--
+-- General idea of python asyncs is: we start new thread using forkOS
+-- and run python code there and hope that it won't interfere with
+-- anything.
+--
+-- Separate problem is interrupting such threads. There're several
+-- constraints which severly limit possible implementations:
+--
+--  1. Haskell exception cannot be delivered while thread is running
+--     python. We're in the middle of foreign call. We need to
+--     interrupt python as well.
+--
+--  2. PyThreadState_SetAsyncExc doesn't queue exception. If python
+--     thread isn't running (e.g. released GIL by calling liftIO) it's
+--     a noop.
+--
+--  3. PyThreadState_SetAsyncExc uses OS thread id as key for thread
+--     interruption. And haskell runtime can schedule another thread
+--     on same OS thread. So we must not to attempt to interrupt
+--     thread after it finished.
+--
+-- So we try to throw both haskell and python exceptions concurrently
+-- and add MVar lock to check liveliness of worker thread,
+
+
 -- | Exception thrown to a thread doing async python computation.
 data PyAsyncCancelled = PyAsyncCancelled
   deriving (Show, Eq)
@@ -550,9 +580,9 @@ instance Exception PyAsyncCancelled
 --   'runPyAsync'. It's performed on separate OS thread. Use
 --   'wait'\/'waitCatch' to obtain computation result.
 data PyAsync a = PyAsync
-  { asyncTID   :: !ThreadId
-  , asyncPyTID :: !(IO Word64)
-  , asyncAlive :: !(MVar Bool)
+  { asyncTID   :: !ThreadId    -- Thread ID
+  , asyncPyTID :: !(IO Word64) -- Thread ID used by python
+  , asyncAlive :: !(MVar Bool) -- Holds True while thread is alive
   , asyncWait  :: STM (Either SomeException a)
   }
 
@@ -566,49 +596,6 @@ waitPy a = either throwSTM pure =<< a.asyncWait
 waitPyCatch :: PyAsync a -> STM (Either SomeException a)
 waitPyCatch = (.asyncWait)
 
--- | Cancel execution of asynchronous computation. Most likely thread
---   will be executing some python so first it attempts to raise async
---   exception in python code. Then it throws 'PyAsyncCancelled' in case
---   it executes haskell code. This means thread could be terminate
---   either with 'PyError' or 'PyAsyncCancelled'.
---
---   Note that python code generally is not written under assumption
---   that it could be smitten with exception at an absolutely any
---   moment.
-cancelPy :: PyAsync a -> IO ()
-cancelPy PyAsync{asyncTID=tid, asyncPyTID, asyncAlive}
-  = go
-  where
-    go = do
-      -- As long as thread is running python code it couldn't be
-      -- interrupted by haskell exception so we spawn separate thread
-      -- which attempts to repeatedly interrupt python evaluation.
-      --
-      -- PyThreadState_SetAsyncExc won't do anything if thread isn't
-      -- running python at the moment so we attempt to cancel python
-      -- repeatedly until we get
-      py_tid  <- asyncPyTID
-      -- Interrupting python
-      _ <- forkIO $ fix $ \loop -> do
-        join $ withMVar asyncAlive $ \case
-          False -> return $ return ()
-          True  -> do
-            [C.block| void {
-              int gil = PyGILState_Ensure();
-              int n   = PyThreadState_SetAsyncExc($(uint64_t py_tid), inline_py_AsyncError());
-              printf("My job is done (%d) tid=(%ld)\n", n, $(uint64_t py_tid));
-              PyGILState_Release(gil);
-              }|]
-            return $ do
-              threadDelay 50 -- Avoid hammering interrupt too hard
-              loop
-      throwTo tid PyAsyncCancelled
-
-
--- | Variant of 'cancel' which isn't interruptible.
-uninterruptibleCancelPy :: PyAsync a -> IO ()
-uninterruptibleCancelPy = uninterruptibleMask_ . cancelPy
-
 -- | Create new OS thread and execute python code on it.
 runPyAsync :: Py a -> IO (PyAsync a)
 runPyAsync py = do
@@ -616,6 +603,9 @@ runPyAsync py = do
   result    <- newEmptyTMVarIO
   py_tid_mv <- newEmptyMVar
   alive     <- newMVar True
+  -- Worker thread. We must modify liveliness MVar under
+  -- uninterruptibleMask otherwise it could be interrupted and
+  -- cancelPy will consider thread alive forever
   tid    <- forkOS $ mask_ $
     (do putMVar py_tid_mv =<< [C.exp| uint64_t { PyThread_get_thread_ident() } |]
         a <- try $ unsafeRunPy $ ensureGIL py
@@ -627,6 +617,44 @@ runPyAsync py = do
     , asyncWait  = takeTMVar result
     , asyncAlive = alive
     }
+
+
+-- | Cancel execution of asynchronous computation. Most likely thread
+--   will be executing some python so first it attempts to raise async
+--   exception in python code. Then it throws 'PyAsyncCancelled' in case
+--   it executes haskell code. This means thread could be terminate
+--   either with 'PyError' or 'PyAsyncCancelled'.
+--
+--   Note that python code generally is not written under assumption
+--   that it could be smitten with exception at an absolutely any
+--   moment.
+cancelPy :: PyAsync a -> IO ()
+cancelPy PyAsync{asyncTID=tid, asyncPyTID, asyncAlive} = do
+  -- See NOTE: [Py Async]
+  py_tid  <- asyncPyTID
+  -- Interrupting python
+  _ <- forkIO $ fix $ \loop -> do
+    -- Attempt to interrupt python. Only if thread is still alive
+    n <- withMVar asyncAlive $ \case
+      False -> return 1
+      True  -> [C.block| int {
+        int gil = PyGILState_Ensure();
+        int n   = PyThreadState_SetAsyncExc($(uint64_t py_tid), inline_py_AsyncError());
+        PyGILState_Release(gil);
+        return n;
+        }|]
+    case n of
+      0 -> do
+        threadDelay 50 -- Avoid hammering interrupt too hard
+        loop
+      _ -> return ()
+  -- Interrupt haskell
+  throwTo tid PyAsyncCancelled
+
+
+-- | Variant of 'cancel' which isn't interruptible.
+uninterruptibleCancelPy :: PyAsync a -> IO ()
+uninterruptibleCancelPy = uninterruptibleMask_ . cancelPy
 
 -- | Create new OS thread and execute python code on it. Will use
 --   'uninterruptibleCancel' after callback finishes execution.
