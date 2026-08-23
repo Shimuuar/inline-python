@@ -17,7 +17,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - { cabal: "3.14", os: ubuntu-latest,  ghc: "9.2.8",  python-version: "3.12" }
           - { cabal: "3.14", os: ubuntu-latest,  ghc: "9.4.8",  python-version: "3.12" }
           - { cabal: "3.14", os: ubuntu-latest,  ghc: "9.6.6",  python-version: "3.12" }
           - { cabal: "3.14", os: ubuntu-latest,  ghc: "9.8.4",  python-version: "3.12" }

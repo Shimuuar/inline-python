@@ -1,3 +1,6 @@
+{-# LANGUAGE CPP                 #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings   #-}
 import Data.Either
@@ -12,15 +15,18 @@ import Distribution.Types.CondTree
 import Distribution.Types.ForeignLib
 import Distribution.Types.UnqualComponentName
 import Distribution.Utils.Path
-import System.Process
-import Data.List (intercalate, nub)
-
 import Distribution.Compat.Lens
-import qualified Distribution.Types.BuildInfo.Lens as L
+import Distribution.Types.BuildInfo.Lens qualified as L
+
+import Data.List (intercalate, nub)
+import System.Process
+
 
 main :: IO ()
 main = defaultMainWithHooks $ simpleUserHooks
   { confHook = patchedConfHook }
+
+
 
 patchedConfHook
   :: (GenericPackageDescription, HookedBuildInfo)
@@ -29,7 +35,7 @@ patchedConfHook
 patchedConfHook (gpd, hbi) flags
   | Just True <- lookupFlagAssignment ("python3-config") $ configConfigurationsFlags flags
   = do cflags_raw  <- readProcess "python3-config" ["--cflags"] ""
-       ldflags_raw <- readProcess "python3-config" ["--embed", "--ldflags"] ""  
+       ldflags_raw <- readProcess "python3-config" ["--embed", "--ldflags"] ""
        -- Split flags
        let (inc_dirs,cflags) = partitionEithers
              [ case flag of
@@ -46,10 +52,10 @@ patchedConfHook (gpd, hbi) flags
              ]
        let tweakLib lib = case lib.libName of
              LMainLibName -> lib & L.ccOptions    %~ (++ cflags)
-                                 & L.includeDirs  %~ (++ inc_dirs)
+                                 & L.includeDirs  %~ (++ (toSymb <$> inc_dirs))
                                  & L.ldOptions    %~ (++ ldflags)
                                  & L.extraLibs    %~ (++ libs)
-                                 & L.extraLibDirs %~ (++ lib_dirs)
+                                 & L.extraLibDirs %~ (++ (toSymb <$> lib_dirs))
              _            -> lib
        confHook simpleUserHooks
          ( gpd { condLibrary = (fmap . fmap) tweakLib (condLibrary  gpd) }
@@ -60,3 +66,14 @@ patchedConfHook (gpd, hbi) flags
 
 tokenizeArguments :: String -> [String]
 tokenizeArguments = words
+
+----------------------------------------------------------------
+-- Compatibility
+
+#if MIN_VERSION_Cabal_syntax(3,14,0)
+toSymb :: String -> SymbolicPathX 'AllowAbsolute from to
+toSymb = makeSymbolicPath
+#else
+toSymb :: String -> String
+toSymb = id
+#endif

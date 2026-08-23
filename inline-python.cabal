@@ -24,7 +24,6 @@ extra-source-files:
   py/bound-vars.py
 
 Tested-With:
-  GHC == 9.2.8
   GHC == 9.4.8
   GHC == 9.6.7
   GHC == 9.8.4
@@ -33,7 +32,7 @@ Tested-With:
 
 
 custom-setup
-  setup-depends: base          >=4.14 && <5
+  setup-depends: base          >=4.15 && <5
                , Cabal         >=3.0  && <4
                , Cabal-syntax  >=3.6  && <4
                , process       >=1.6  && <2
@@ -67,7 +66,7 @@ common language
 ----------------------------------------------------------------
 Library
   import:            language
-  Build-Depends:     base             >=4.14 && <5
+  Build-Depends:     base             >=4.15 && <5
                    , primitive        >=0.6.2
                    , vector           >=0.13.2
                    , containers       >=0.5
