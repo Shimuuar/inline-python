@@ -120,7 +120,7 @@ library test
 test-suite inline-python-tests
   import:           language
   type:             exitcode-stdio-1.0
-  Ghc-options:      -threaded -with-rtsopts=-N2
+  Ghc-options:      -threaded -rtsopts -with-rtsopts=-N2
   hs-source-dirs:   test/exe
   main-is:          main.hs
   build-depends:    base
@@ -131,6 +131,7 @@ test-suite inline-python-tests
 test-suite inline-python-tests1
   import:           language
   type:             exitcode-stdio-1.0
+  Ghc-options:      -rtsopts
   hs-source-dirs:   test/exe
   main-is:          main.hs
   build-depends:    base
