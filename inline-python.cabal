@@ -1,7 +1,5 @@
 Cabal-Version:  3.0
---Build-Type:     Hooks
 Build-Type:     Custom
---Build-Type:     Simple
                 
 Name:           inline-python
 Version:        0.2.1.0
@@ -35,11 +33,10 @@ Tested-With:
 
 
 custom-setup
-  setup-depends: base
---               , Cabal-hooks
-               , Cabal
-               , Cabal-syntax
-               , process
+  setup-depends: base          >=4.14 && <5
+               , Cabal         >=3.0  && <4
+               , Cabal-syntax  >=3.6  && <4
+               , process       >=1.6  && <2
 
 flag python3-config
     Description: Use python3-config instead of pkg-config
