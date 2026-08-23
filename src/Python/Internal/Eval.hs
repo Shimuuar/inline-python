@@ -589,7 +589,7 @@ cancelPy PyAsync{asyncTID=tid, asyncPyTID, asyncAlive}
       -- repeatedly until we get
       py_tid  <- asyncPyTID
       -- Interrupting python
-      _ <- forkIO $ runInBoundThread $ fix $ \loop -> do
+      _ <- forkIO $ fix $ \loop -> do
         join $ withMVar asyncAlive $ \case
           False -> return $ return ()
           True  -> do
