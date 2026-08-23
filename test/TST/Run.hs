@@ -190,16 +190,16 @@ tests = testGroup "Run python"
                                                       True  -> error "Timeout"
                                                       False -> retry
         return ()
-    -- , -- Cancellation of haskell code
-    --   testCase "cancelPy [haskell]" $ do
-    --     a <- runPyAsync $ do
-    --       liftIO $ forever $ threadDelay 1_000_000
-    --     d <- registerDelay 100_000
-    --     cancelPy a
-    --     _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
-    --                                                   True  -> error "Timeout"
-    --                                                   False -> retry
-    --     return ()
+    , -- Cancellation of haskell code
+      testCase "cancelPy [haskell]" $ do
+        a <- runPyAsync $ do
+          liftIO $ forever $ threadDelay 1_000_000
+        d <- registerDelay 100_000
+        cancelPy a
+        _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
+                                                      True  -> error "Timeout"
+                                                      False -> retry
+        return ()
     ]
   ]
 
