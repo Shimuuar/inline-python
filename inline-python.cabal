@@ -80,6 +80,7 @@ Library
     Python.Inline.QQ
     Python.Inline.Eval
     Python.Inline.Types
+    Python.Inline.Async
   Other-modules:
     Python.Internal.CAPI
     Python.Internal.Eval
@@ -98,6 +99,7 @@ library test
                   , tasty                >=1.2
                   , tasty-hunit          >=0.10
                   , tasty-quickcheck     >=0.10
+                  , stm
                   , quickcheck-instances >=0.3.33
                   , exceptions
                   , containers
@@ -118,7 +120,7 @@ library test
 test-suite inline-python-tests
   import:           language
   type:             exitcode-stdio-1.0
-  Ghc-options:      -threaded -with-rtsopts=-N2
+  Ghc-options:      -threaded -rtsopts -with-rtsopts=-N2
   hs-source-dirs:   test/exe
   main-is:          main.hs
   build-depends:    base
@@ -129,6 +131,7 @@ test-suite inline-python-tests
 test-suite inline-python-tests1
   import:           language
   type:             exitcode-stdio-1.0
+  Ghc-options:      -rtsopts
   hs-source-dirs:   test/exe
   main-is:          main.hs
   build-depends:    base

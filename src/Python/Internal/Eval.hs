@@ -2,6 +2,7 @@
 {-# LANGUAGE QuasiQuotes               #-}
 {-# LANGUAGE RecordWildCards           #-}
 {-# LANGUAGE TemplateHaskell           #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 -- |
 -- Evaluation of python expressions.
 module Python.Internal.Eval
@@ -16,6 +17,15 @@ module Python.Internal.Eval
   , runPy
   , runPyInMain
   , unsafeRunPy
+    -- ** Async
+  , PyAsync
+  , PyAsyncCancelled(..)
+  , waitPy
+  , waitPyCatch
+  , cancelPy
+  , uninterruptibleCancelPy
+  , runPyAsync
+  , withPyAsync
     -- * GC-related
   , newPyObject
     -- * C-API wrappers
@@ -54,6 +64,7 @@ import Control.Monad.Trans.Cont
 import Data.Maybe
 import Data.Function
 import Data.ByteString.Unsafe    qualified as BS
+import Data.Word
 import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -98,32 +109,27 @@ C.include "<inline-python.h>"
 -- implement N-M threading and schedules N green thread on M OS
 -- threads as it see fit.
 --
--- One could think that running python code in bound threads and
--- making sure that GIL is held would suffice. It doesn't. Doing so
--- would quickly results in deadlock. Exact reason for that is not
--- understood.
---
 -- Another problem is GHC may schedule two threads each running python
--- code on same capability. They won't have any problems taking GIL
--- and will run concurrently stepping on each other's toes.
+-- code on same capability. It seems very likely that they'll step on
+-- each others' toes.
 --
--- Only way to solve this problem is to introduce another lock on
--- haskell side. It's visible to haskell RTS so we won't get deadlocks
--- and it makes sure that only one haskell thread interacts with
--- python at a time.
+-- Current solution is to protect execution of python code with global
+-- lock. Since it's visible to haskell RTS we don't get deadlocks.
+-- This also means we can't execute python code concurrently.
 --
---
+-- There's support for running python code concurrently but it's very
+-- experimental. See NOTE [Py Async] for details
+
+
+
+-- NOTE: [Main thread]
+-- ~~~~~~~~~~~~~~~~~~~
 --
 -- Also python designate thread in which python interpreter was
 -- initialized as a main thread. It has special status for example
 -- some libraries may run only in main thread (e.g. tkinter). But if
 -- we don't take special precautions we won't know which thread it
 -- is.
---
---
---
--- There's of course question how well python threading interacts with
--- haskell. No one knows, probably it won't work well.
 
 
 
@@ -274,6 +280,13 @@ releaseLock tid = readTVar globalPyLock >>= \case
         []    -> LockUnlocked
         t':ts -> Locked t' ts
 
+ensureInit :: STM ()
+ensureInit = readTVar globalPyLock >>= \case
+  LockUninialized -> throwSTM PythonNotInitialized
+  LockFinalized   -> throwSTM PythonIsFinalized
+  LockedByGC      -> pure ()
+  LockUnlocked    -> pure ()
+  Locked{}        -> pure ()
 
 
 ----------------------------------------------------------------
@@ -286,8 +299,8 @@ releaseLock tid = readTVar globalPyLock >>= \case
 initializePython :: IO ()
 -- See NOTE: [Python and threading]
 initializePython = [CU.exp| int { Py_IsInitialized() } |] >>= \case
-  0 | rtsSupportsBoundThreads -> runInBoundThread $ doInializePython
-    | otherwise               -> doInializePython
+  0 | rtsSupportsBoundThreads -> runInBoundThread $ doInitializePython
+    | otherwise               -> doInitializePython
   _ -> pure ()
 
 -- | Destroy python interpreter.
@@ -326,8 +339,8 @@ withPython :: IO a -> IO a
 withPython = bracket_ initializePython finalizePython
 
 
-doInializePython :: IO ()
-doInializePython = do
+doInitializePython :: IO ()
+doInitializePython = do
   -- First we need to grab global python lock on haskell side
   join $ atomically $ do
     readTVar globalPyState >>= \case
@@ -360,7 +373,7 @@ doInializePython = do
                 fini $ RunningN gc_chan lock_eval tid_main tid_gc
             -- Nothing special is needed on single threaded RTS
             | otherwise -> do
-                doInializePythonIO >>= \case
+                doInitializePythonIO >>= \case
                   True  -> pure ()
                   False -> throwM PyInitializationFailed
                 fini Running1
@@ -369,7 +382,7 @@ doInializePython = do
 -- This action is executed on python's main thread
 mainThread :: MVar Bool -> MVar EvalReq -> IO ()
 mainThread lock_init lock_eval = do
-  r_init <- doInializePythonIO
+  r_init <- doInitializePythonIO
   putMVar lock_init r_init
   case r_init of
     False -> pure ()
@@ -388,8 +401,8 @@ mainThread lock_init lock_eval = do
         HereWeGoAgain -> loop
 
 
-doInializePythonIO :: IO Bool
-doInializePythonIO = do
+doInitializePythonIO :: IO Bool
+doInitializePythonIO = do
   -- FIXME: I'd like more direct access to argv
   argv0 <- getProgName
   argv  <- getArgs
@@ -516,12 +529,138 @@ runPyInMain py
                       takeMVar resp `onException` throwTo tid_main InterruptMain
       either throwM pure r
 
-
 -- | Execute python action. This function is unsafe and should be only
 --   called in thread of interpreter.
 unsafeRunPy :: Py a -> IO a
 unsafeRunPy (Py io) = io
 
+
+----------------------------------------------------------------
+-- Async running
+----------------------------------------------------------------
+
+-- NOTE: [Py Async]
+-- ~~~~~~~~~~~~~~~~
+--
+-- Interaction with concurrent python in multithreaded environments
+-- stays on rather shaky foundations. I'm not sure that RTS won't
+-- schedule regular threads on forkOS'd thread and they won't cause
+-- problems there.
+--
+-- General idea of python asyncs is: we start new thread using forkOS
+-- and run python code there and hope that it won't interfere with
+-- anything.
+--
+-- Separate problem is interrupting such threads. There're several
+-- constraints which severly limit possible implementations:
+--
+--  1. Haskell exception cannot be delivered while thread is running
+--     python. We're in the middle of foreign call. We need to
+--     interrupt python as well.
+--
+--  2. PyThreadState_SetAsyncExc doesn't queue exception. If python
+--     thread isn't running (e.g. released GIL by calling liftIO) it's
+--     a noop.
+--
+--  3. PyThreadState_SetAsyncExc uses OS thread id as key for thread
+--     interruption. And haskell runtime can schedule another thread
+--     on same OS thread. So we must not to attempt to interrupt
+--     thread after it finished.
+--
+-- So we try to throw both haskell and python exceptions concurrently
+-- and add MVar lock to check liveliness of worker thread,
+
+
+-- | Exception thrown to a thread doing async python computation.
+data PyAsyncCancelled = PyAsyncCancelled
+  deriving (Show, Eq)
+
+instance Exception PyAsyncCancelled
+
+-- | Handle to asynchronous python computation spawned by
+--   'runPyAsync'. It's performed on separate OS thread. Use
+--   'wait'\/'waitCatch' to obtain computation result.
+data PyAsync a = PyAsync
+  { asyncTID   :: !ThreadId    -- Thread ID
+  , asyncPyTID :: !(IO Word64) -- Thread ID used by python
+  , asyncAlive :: !(MVar Bool) -- Holds True while thread is alive
+  , asyncWait  :: STM (Either SomeException a)
+  }
+
+-- | Wait for result of asynchronous computation. If it threw an
+--   exception it will be rethrown by @wait@.
+waitPy :: PyAsync a -> STM a
+waitPy a = either throwSTM pure =<< a.asyncWait
+
+-- | Wait for result of asynchronous computation. Exception thrown by
+--   it will be returned as @Left@.
+waitPyCatch :: PyAsync a -> STM (Either SomeException a)
+waitPyCatch = (.asyncWait)
+
+-- | Create new OS thread and execute python code on it.
+runPyAsync :: Py a -> IO (PyAsync a)
+runPyAsync py = do
+  atomically ensureInit
+  result    <- newEmptyTMVarIO
+  py_tid_mv <- newEmptyMVar
+  alive     <- newMVar True
+  -- Worker thread. We must modify liveliness MVar under
+  -- uninterruptibleMask otherwise it could be interrupted and
+  -- cancelPy will consider thread alive forever
+  tid    <- forkOS $ mask_ $
+    (do putMVar py_tid_mv =<< [C.exp| uint64_t { PyThread_get_thread_ident() } |]
+        a <- try $ unsafeRunPy $ ensureGIL py
+        atomically $ putTMVar result a
+    ) `finally` uninterruptibleMask_ (modifyMVar_ alive (\_ -> pure False))
+  pure PyAsync
+    { asyncTID   = tid
+    , asyncPyTID = readMVar py_tid_mv
+    , asyncWait  = takeTMVar result
+    , asyncAlive = alive
+    }
+
+
+-- | Cancel execution of asynchronous computation. Most likely thread
+--   will be executing some python so first it attempts to raise async
+--   exception in python code. Then it throws 'PyAsyncCancelled' in case
+--   it executes haskell code. This means thread could be terminate
+--   either with 'PyError' or 'PyAsyncCancelled'.
+--
+--   Note that python code generally is not written under assumption
+--   that it could be smitten with exception at an absolutely any
+--   moment.
+cancelPy :: PyAsync a -> IO ()
+cancelPy PyAsync{asyncTID=tid, asyncPyTID, asyncAlive} = do
+  -- See NOTE: [Py Async]
+  py_tid  <- asyncPyTID
+  -- Interrupting python
+  _ <- forkIO $ fix $ \loop -> do
+    -- Attempt to interrupt python. Only if thread is still alive
+    n <- withMVar asyncAlive $ \case
+      False -> return 1
+      True  -> [C.block| int {
+        int gil = PyGILState_Ensure();
+        int n   = PyThreadState_SetAsyncExc($(uint64_t py_tid), inline_py_AsyncError());
+        PyGILState_Release(gil);
+        return n;
+        }|]
+    case n of
+      0 -> do
+        threadDelay 50 -- Avoid hammering interrupt too hard
+        loop
+      _ -> return ()
+  -- Interrupt haskell
+  throwTo tid PyAsyncCancelled
+
+
+-- | Variant of 'cancel' which isn't interruptible.
+uninterruptibleCancelPy :: PyAsync a -> IO ()
+uninterruptibleCancelPy = uninterruptibleMask_ . cancelPy
+
+-- | Create new OS thread and execute python code on it. Will use
+--   'uninterruptibleCancel' after callback finishes execution.
+withPyAsync :: Py a -> (PyAsync a -> IO b) -> IO b
+withPyAsync py = bracket (runPyAsync py) uninterruptibleCancelPy
 
 
 ----------------------------------------------------------------
@@ -597,6 +736,10 @@ dropGIL action = do
         `finally` [C.exp| void { PyEval_RestoreThread($(PyThreadState *st)) } |]
 
 
+-- | Removes exception masking and releases GIL temporarily
+instance MonadIO Py where
+  liftIO = dropGIL . interruptible
+
 ----------------------------------------------------------------
 -- Conversion of exceptions
 ----------------------------------------------------------------
@@ -623,7 +766,18 @@ convertPy2Haskell = runProgram $ do
        PyErr_Fetch(p, p+1, p+2);
        }|]
     p_type  <- peekElemOff p_errors 0
-    p_value <- peekElemOff p_errors 1
+    -- NOTE: When we set exception using PyThreadState_SetAsyncExc
+    --       this field remains NULL on python<=3.11. In this case we
+    --       assume it's our AsyncError:
+    p_value <- peekElemOff p_errors 1 >>= \case
+      NULL -> [CU.block| PyObject* {
+        PyObject *err_class = inline_py_AsyncError();
+        PyObject *tuple     = PyTuple_New(0);
+        PyObject *err       = PyObject_Call(err_class, tuple, NULL);
+        Py_DECREF(tuple);
+        return err;
+        } |]
+      p    -> pure p
     -- Traceback is not used ATM
     pure (p_type,p_value)
   -- Convert exception type and value to strings.
