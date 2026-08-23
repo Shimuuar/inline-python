@@ -439,6 +439,17 @@ doInitializePythonIO = do
           goto error;
       };
       PyConfig_Clear(&cfg);
+      // This is hack for python<=3.11.
+      //
+      // Somehow we may end up in stet where thread ID of main thread is not equal
+      // to main thread's one. Importing threading seems to fix it. However exact
+      // reason for such behavior is unknown
+      if( PY_MINOR_VERSION <= 11 ) {
+          PyObject *threading = PyImport_ImportModule("threading");
+          if( PyErr_Occurred() ) {
+              PyErr_Clear();
+          }
+      }
       // Release GIL so other threads may take it
       PyEval_SaveThread();
       return 0;
