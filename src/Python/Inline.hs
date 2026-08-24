@@ -133,5 +133,52 @@ import Python.Internal.Eval
 --
 -- Attempting to import library using C extensions from ghci may
 -- result in linker failing to find symbols from @libpython@ like
--- @PyFloat_Type@ or some other. Only known workaround is to set
--- @LD_PRELOAD=/path/to/libpython3.XX.so@ environment variable.
+-- @PyFloat_Type@ or some other. There are multiples known workarounds:
+--
+--
+-- - export @LD_PRELOAD=/path/to/libpython3.XX.so@ environment variable. This
+-- works fine most of the time but it will also impact programs called from
+-- your repl (e.g. using 'process').
+-- - you can load the relevant symbol only in the current process space using
+-- 
+-- > System.Posix.DynamicLinker.dlopen "/path/to/lib/libpython3.XX.so" [System.Posix.DynamicLinker.RTLD_NOW, System.Posix.DynamicLinker.RTLD_GLOBAL]
+--
+-- Note that in ghci, you don't need to explicitly import
+-- "System.Posix.DynamicLinker" to run this command. If you use this
+-- extensively in your project, it is recommended to add that in your @.ghci@,
+-- either as an unconditionally executed command, or as a macro, such as:
+--
+-- > :def setupPythonDLL \_ -> "" <$ System.Posix.DynamicLinker.dlopen "path/to//lib/libpython3.so" [System.Posix.DynamicLinker.RTLD_NOW, System.Posix.DynamicLinker.RTLD_GLOBAL]@
+--
+-- 4. __GHCi reload__
+--
+-- Even if you reload ghci (using @:reload@), the python environment stays
+-- initialised. As a result, the python modules imported using 'Python.Inline.QQ.pymain' won't
+-- be reloaded, which is often source of confusion.
+--
+-- You can use python's @importlib.reload(m)@. For example:
+--
+-- >
+-- >         [pymain|
+-- >           import json
+-- >           import importlib
+-- >           import pandas
+-- >           import mylib
+-- >
+-- >           # This force reloads mylib
+-- >           importlib.reload(run_saem)
+-- >       |]
+-- 
+--
+-- Note that there is a performance drawback, the side effects of 'import' are
+-- redone and python does not give much guarantee about what is happening here.
+-- Use it with caution. We recommend using @importlib.reload@ only during
+-- development and not in production.
+--
+-- 5. __Asynchronous exceptions__
+--
+-- The code run by 'runPy' is not interruptible by Haskell asynchronous
+-- exceptions and may block indefinitely. If your code call any Haskell
+-- function as callback, they won't receive asynchronous exception either. See
+-- https://github.com/Shimuuar/inline-python/issues/48 for details and
+-- workarounds.
