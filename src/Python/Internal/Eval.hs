@@ -64,7 +64,6 @@ import Control.Monad.Trans.Cont
 import Data.Maybe
 import Data.Function
 import Data.ByteString.Unsafe    qualified as BS
-import Data.Word
 import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -592,9 +591,9 @@ instance Exception PyAsyncCancelled
 --   'runPyAsync'. It's performed on separate OS thread. Use
 --   'wait'\/'waitCatch' to obtain computation result.
 data PyAsync a = PyAsync
-  { asyncTID   :: !ThreadId    -- Thread ID
-  , asyncPyTID :: !(IO Word64) -- Thread ID used by python
-  , asyncAlive :: !(MVar Bool) -- Holds True while thread is alive
+  { asyncTID   :: !ThreadId        -- Thread ID
+  , asyncPyTID :: !(IO PyThreadId) -- Thread ID used by python
+  , asyncAlive :: !(MVar Bool)     -- Holds True while thread is alive
   , asyncWait  :: STM (Either SomeException a)
   }
 
@@ -619,7 +618,7 @@ runPyAsync py = do
   -- uninterruptibleMask otherwise it could be interrupted and
   -- cancelPy will consider thread alive forever
   tid    <- forkOS $ mask_ $
-    (do putMVar py_tid_mv =<< [C.exp| uint64_t { PyThread_get_thread_ident() } |]
+    (do putMVar py_tid_mv =<< getPyThreadID
         a <- try $ unsafeRunPy $ ensureGIL py
         atomically $ putTMVar result a
     ) `finally` uninterruptibleMask_ (modifyMVar_ alive (\_ -> pure False))
@@ -643,7 +642,7 @@ runPyAsync py = do
 cancelPy :: PyAsync a -> IO ()
 cancelPy PyAsync{asyncTID=tid, asyncPyTID, asyncAlive} = do
   -- See NOTE: [Py Async]
-  py_tid  <- asyncPyTID
+  PyThreadId py_tid <- asyncPyTID
   -- Interrupting python
   _ <- forkIO $ fix $ \loop -> do
     -- Attempt to interrupt python. Only if thread is still alive
@@ -750,6 +749,9 @@ dropGIL action = do
 -- | Removes exception masking and releases GIL temporarily
 instance MonadIO Py where
   liftIO = dropGIL . interruptible
+
+getPyThreadID :: IO PyThreadId
+getPyThreadID = PyThreadId <$> [CU.exp| uint64_t { PyThread_get_thread_ident() } |]
 
 ----------------------------------------------------------------
 -- Conversion of exceptions
