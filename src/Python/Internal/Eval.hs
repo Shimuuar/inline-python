@@ -66,6 +66,7 @@ import Data.ByteString.Unsafe    qualified as BS
 import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
+import Foreign.StablePtr
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Marshal.Array
@@ -538,33 +539,23 @@ unsafeRunPy (Py io) = io
 -- NOTE: [Py Async]
 -- ~~~~~~~~~~~~~~~~
 --
--- Interaction with concurrent python in multithreaded environments
--- stays on rather shaky foundations. I'm not sure that RTS won't
--- schedule regular threads on forkOS'd thread and they won't cause
--- problems there.
+-- In order to run python threads concurrently and to be able to
+-- cancel them we need to run python in dedicated thread. See NOTE
+-- [Interrupting python] for details.
 --
--- General idea of python asyncs is: we start new thread using forkOS
--- and run python code there and hope that it won't interfere with
--- anything.
+-- `forkOS` seems to provide such functionality although it's not
+-- documented explicitly. It allows to provide async-inspired API for
+-- interacting with python thread.
 --
--- Separate problem is interrupting such threads. There're several
--- constraints which severly limit possible implementations:
+-- Most complicated part of API is interrupting python. [Interrupting
+-- python] gives high level overview. Here more technical details:
 --
---  1. Haskell exception cannot be delivered while thread is running
---     python. We're in the middle of foreign call. We need to
---     interrupt python as well.
+--  + PyThreadState_SetAsyncExc doesn't queue exception. So it very
+--    well may be noop if it finds no such thread. We have to repeat
+--    interrupting python.
 --
---  2. PyThreadState_SetAsyncExc doesn't queue exception. If python
---     thread isn't running (e.g. released GIL by calling liftIO) it's
---     a noop.
---
---  3. PyThreadState_SetAsyncExc uses OS thread id as key for thread
---     interruption. And haskell runtime can schedule another thread
---     on same OS thread. So we must not to attempt to interrupt
---     thread after it finished.
---
--- So we try to throw both haskell and python exceptions concurrently
--- and add MVar lock to check liveliness of worker thread,
+--  + forkOS may reuse OS thread. So we must not attempt interrupt if
+--    thread is dead already.
 
 
 -- | Exception thrown to a thread doing async python computation.
@@ -577,10 +568,11 @@ instance Exception PyAsyncCancelled
 --   'runPyAsync'. It's performed on separate OS thread. Use
 --   'wait'\/'waitCatch' to obtain computation result.
 data PyAsync a = PyAsync
-  { asyncTID   :: !ThreadId        -- Thread ID
-  , asyncPyTID :: !(IO PyThreadId) -- Thread ID used by python
-  , asyncAlive :: !(MVar Bool)     -- Holds True while thread is alive
-  , asyncWait  :: STM (Either SomeException a)
+  { asyncTID      :: !ThreadId          -- Thread ID
+  , asyncTidStack :: !(TVar [ThreadId]) -- Stack of callback thread ID
+  , asyncPyTID    :: !(IO PyThreadId)   -- Thread ID used by python
+  , asyncAlive    :: !(MVar Bool)       -- Holds True while thread is alive
+  , asyncWait     :: STM (Either SomeException a)
   }
 
 -- | Wait for result of asynchronous computation. If it threw an
@@ -598,6 +590,7 @@ runPyAsync :: Py a -> IO (PyAsync a)
 runPyAsync py = do
   ensureInit
   result    <- newEmptyTMVarIO
+  tid_stack <- newTVarIO []
   py_tid_mv <- newEmptyMVar
   alive     <- newMVar True
   -- Worker thread. We must modify liveliness MVar under
@@ -605,15 +598,34 @@ runPyAsync py = do
   -- cancelPy will consider thread alive forever
   tid    <- forkOS $ mask_ $
     (do putMVar py_tid_mv =<< getPyThreadID
-        a <- try $ ensurePyLock $ unsafeRunPy $ ensureGIL py
+        a <- try
+           $ withAsyncInitTLS tid_stack
+           $ ensurePyLock
+           $ unsafeRunPy
+           $ ensureGIL py
         atomically $ putTMVar result a
     ) `finally` uninterruptibleMask_ (modifyMVar_ alive (\_ -> pure False))
   pure PyAsync
-    { asyncTID   = tid
-    , asyncPyTID = readMVar py_tid_mv
-    , asyncWait  = takeTMVar result
-    , asyncAlive = alive
+    { asyncTID      = tid
+    , asyncTidStack = tid_stack
+    , asyncPyTID    = readMVar py_tid_mv
+    , asyncWait     = takeTMVar result
+    , asyncAlive    = alive
     }
+
+-- Initialize thread local storage for thread created by runPyAsync
+withAsyncInitTLS :: TVar [ThreadId] -> IO a -> IO a
+withAsyncInitTLS stack = bracket ini fini . const
+  where
+    ini = do
+      s_ptr <- newStablePtr stack
+      let ptr = castStablePtrToPtr s_ptr
+      [CU.exp| void { inline_py_init_state($(void* ptr)) } |]
+      pure s_ptr
+    fini s_ptr = do
+      [CU.exp| void { inline_py_free_state() } |]
+      freeStablePtr s_ptr
+
 
 
 -- | Cancel execution of asynchronous computation. Most likely thread
@@ -626,12 +638,13 @@ runPyAsync py = do
 --   that it could be smitten with exception at an absolutely any
 --   moment.
 cancelPy :: PyAsync a -> IO ()
-cancelPy PyAsync{asyncTID=tid, asyncPyTID, asyncAlive} = do
-  -- See NOTE: [Py Async]
+cancelPy PyAsync{asyncTID=tid, asyncTidStack, asyncPyTID, asyncAlive} = do
+  -- See NOTE: [Py Async], [Interrupting python]
   PyThreadId py_tid <- asyncPyTID
-  -- Interrupting python
+  -- Interrupting python. We must attempt interrupting only as long as
+  -- async thread is alive. Else we may end up interrupting wrong
+  -- thread.
   _ <- forkIO $ fix $ \loop -> do
-    -- Attempt to interrupt python. Only if thread is still alive
     n <- withMVar asyncAlive $ \case
       False -> return 1
       True  -> [C.block| int {
@@ -645,9 +658,18 @@ cancelPy PyAsync{asyncTID=tid, asyncPyTID, asyncAlive} = do
         threadDelay 50 -- Avoid hammering interrupt too hard
         loop
       _ -> return ()
+  -- Interrupting callbacks. We repeatedly try to kill every callbacks
+  -- that appears on top of stack. It seems to be only working way.
+  tid_kill_cb <- forkIO $ flip fix Nothing $ \loop t_old -> do
+    t <- atomically $ readTVar asyncTidStack >>= \case
+      []                    -> retry
+      t:_ | Just t == t_old -> retry
+          | otherwise       -> pure t
+    _ <- forkIO $ throwTo t PyAsyncCancelled
+    loop $ Just t
   -- Interrupt haskell
   throwTo tid PyAsyncCancelled
-
+  killThread tid_kill_cb
 
 -- | Variant of 'cancel' which isn't interruptible.
 uninterruptibleCancelPy :: PyAsync a -> IO ()

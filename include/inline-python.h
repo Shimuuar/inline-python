@@ -85,8 +85,19 @@ void inline_py_Integer_FromPy(
 
 
 // ================================================================
-// Async exceptions
+// runPyAsync & Async exceptions
 // ================================================================
+
+// Initialize thread local storage as used by runPyAsync
+void inline_py_init_state(void *stack);
+
+// Delete thread local storage used by runPyAsync
+void inline_py_free_state(void);
+
+// Return stable pointer to stack from TLS
+void* inline_py_get_state(void);
+
+
 
 // Obtain class for async exception
 PyObject* inline_py_AsyncError();

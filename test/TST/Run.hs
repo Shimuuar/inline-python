@@ -200,6 +200,17 @@ tests = testGroup "Run python"
                                                       True  -> error "Timeout"
                                                       False -> retry
         return ()
+    , -- Cancellation of haskell code
+      testCase "cancelPy [callback]" $ do
+        a <- runPyAsync $ do
+          let loop = forever $ threadDelay 1_000_000 :: IO ()
+          forever [py_| loop_hs() |]
+        d <- registerDelay 100_000
+        forkIO $ cancelPy a
+        _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
+                                                      True  -> error "Timeout"
+                                                      False -> retry
+        return ()
     ]
   ]
 

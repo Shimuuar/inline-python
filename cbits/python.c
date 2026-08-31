@@ -221,3 +221,21 @@ PyObject* inline_py_AsyncError() {
     }
     return AsyncError;
 }
+
+
+static Py_tss_t key_py_async = Py_tss_NEEDS_INIT;
+
+void inline_py_init_state(void *stack) {
+    // FIXME: error checking
+    PyThread_tss_create(&key_py_async);
+    PyThread_tss_set(&key_py_async, stack);
+}
+
+void inline_py_free_state(void) {
+    // FIXME: error checking
+    PyThread_tss_set(&key_py_async, NULL);
+}
+
+void* inline_py_get_state(void) {
+    return PyThread_tss_get(&key_py_async);
+}
