@@ -426,6 +426,8 @@ doInitializePythonIO = do
       if( PyStatus_Exception(status) ) {
           goto error;
       };
+      // Make builting module visible to python
+      PyImport_AppendInittab("inline_python", PyInit_inline_python);
       // Initialize interpreter
       status = Py_InitializeFromConfig(&cfg);
       if( PyStatus_Exception(status) ) {

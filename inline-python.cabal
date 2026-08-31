@@ -135,6 +135,7 @@ test-suite inline-python-tests
     TST.Callbacks
     TST.Roundtrip
     TST.Util
+    TST.Module
 
 test-suite inline-python-tests1
   import:           language, tests
@@ -148,6 +149,7 @@ test-suite inline-python-tests1
     TST.Callbacks
     TST.Roundtrip
     TST.Util
+    TST.Module
 
 benchmark pysmall
   import:           language

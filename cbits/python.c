@@ -253,3 +253,27 @@ void inline_py_initialize(void) {
         exit(1);
     }
 }
+
+// ================================================================
+// inline_python module
+
+static PyMethodDef inline_python_methods[] = {
+    {NULL, NULL, 0, NULL}
+};
+
+static PyModuleDef_Slot inline_python_module_slots[] = {
+    {0, NULL}
+};
+
+static struct PyModuleDef inline_python_module = {
+    .m_base    = PyModuleDef_HEAD_INIT,
+    .m_name    = "inline_python",
+    .m_size    = 0,
+    .m_slots   = inline_python_module_slots,
+    .m_methods = inline_python_methods,
+};
+
+PyMODINIT_FUNC PyInit_inline_python(void)
+{
+    return PyModuleDef_Init(&inline_python_module);
+}
