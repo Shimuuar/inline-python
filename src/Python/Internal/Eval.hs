@@ -577,7 +577,7 @@ runPyAsync py = do
   -- cancelPy will consider thread alive forever
   tid    <- forkOS $ mask_ $
     (do putMVar py_tid_mv =<< getPyThreadID
-        a <- try $ unsafeRunPy $ ensureGIL py
+        a <- try $ ensurePyLock $ unsafeRunPy $ ensureGIL py
         atomically $ putTMVar result a
     ) `finally` uninterruptibleMask_ (modifyMVar_ alive (\_ -> pure False))
   pure PyAsync
