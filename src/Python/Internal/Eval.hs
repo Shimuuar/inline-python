@@ -217,16 +217,15 @@ data PyState
 data PyLock
   = LockUninialized
     -- ^ There's no interpreter and lock does not exist.
-  | LockUnlocked
-    -- ^ Lock could be taked
-  | Locked !ThreadId [ThreadId]
-    -- ^ Python is locked by given thread. Lock could be taken multiple
-    --   times
-  | LockedByGC
-    -- ^ Python is locked by GC thread.
+  | LockReady !(TVar Int) !(TMVar ())
+    -- ^ Interpreter is properly initialized and we track number of
+    --   threads running python. Same thread may take lock multiple
+    --   times: e.g. nested runPy.
+    --
+    --   Second parameter is mutex for main. We allow only single
+    --   request in flight.
   | LockFinalized
     -- ^ Python interpreter shut down. Taking lock is not possible
-  deriving Show
 
 -- | Execute code ensuring that python lock is held by current thread.
 ensurePyLock :: IO a -> IO a
@@ -245,7 +244,7 @@ ensurePyLock action = do
 callbackEnsurePyLock :: IO a -> IO a
 callbackEnsurePyLock action = do
   tid <- myThreadId
-  bracket_ (atomically $ grabLock tid)
+  bracket_ (atomically $ acquireLock tid)
            (atomically $ releaseLock tid)
            action
 
@@ -254,39 +253,20 @@ acquireLock :: ThreadId -> STM ()
 acquireLock tid = readTVar globalPyLock >>= \case
   LockUninialized -> throwSTM PythonNotInitialized
   LockFinalized   -> throwSTM PythonIsFinalized
-  LockedByGC      -> retry
-  LockUnlocked    -> writeTVar globalPyLock $ Locked tid []
-  Locked t xs
-    | t == tid  -> writeTVar globalPyLock $ Locked t (t : xs)
-    | otherwise -> retry
-
-grabLock :: ThreadId -> STM ()
-grabLock tid = readTVar globalPyLock >>= \case
-  LockUninialized -> throwSTM PythonNotInitialized
-  LockFinalized   -> throwSTM PythonIsFinalized
-  LockedByGC      -> retry
-  LockUnlocked    -> writeTVar globalPyLock $ Locked tid []
-  Locked t xs     -> writeTVar globalPyLock $ Locked tid (t : xs)
+  LockReady n _   -> modifyTVar' n succ
 
 releaseLock :: ThreadId -> STM ()
 releaseLock tid = readTVar globalPyLock >>= \case
   LockUninialized -> throwSTM PythonNotInitialized
   LockFinalized   -> throwSTM PythonIsFinalized
-  LockUnlocked    -> throwSTM $ PyInternalError "releaseLock: releasing LockUnlocked"
-  LockedByGC      -> throwSTM $ PyInternalError "releaseLock: releasing LockedByGC"
-  Locked t xs
-    | t /= tid  -> throwSTM $ PyInternalError "releaseLock: releasing  wrong lock"
-    | otherwise -> writeTVar globalPyLock $! case xs of
-        []    -> LockUnlocked
-        t':ts -> Locked t' ts
+  LockReady n _   -> modifyTVar' n pred
 
 ensureInit :: STM ()
 ensureInit = readTVar globalPyLock >>= \case
   LockUninialized -> throwSTM PythonNotInitialized
   LockFinalized   -> throwSTM PythonIsFinalized
-  LockedByGC      -> pure ()
-  LockUnlocked    -> pure ()
-  Locked{}        -> pure ()
+  LockReady{}     -> pure ()
+
 
 
 ----------------------------------------------------------------
@@ -326,12 +306,11 @@ finalizePython = join $ atomically $ readTVar globalPyState >>= \case
     checkLock action = readTVar globalPyLock >>= \case
       LockUninialized -> throwSTM $ PyInternalError "finalizePython LockUninialized"
       LockFinalized   -> throwSTM $ PyInternalError "finalizePython LockFinalized"
-      Locked{}        -> retry
-      LockedByGC      -> retry
-      LockUnlocked    -> do
-        writeTVar globalPyLock  LockFinalized
-        writeTVar globalPyState Finalized
-        pure action
+      LockReady n _   -> readTVar n >>= \case
+        0 -> do writeTVar globalPyLock  LockFinalized
+                writeTVar globalPyState Finalized
+                pure action
+        _ -> retry
 
 -- | Bracket which ensures that action is executed with properly
 --   initialized interpreter
@@ -353,8 +332,10 @@ doInitializePython = do
       NotInitialized   -> do
         writeTVar globalPyState InInitialization
         let fini st = atomically $ do
+              n         <- newTVar 0
+              main_lock <- newTMVar ()
               writeTVar globalPyState $ st
-              writeTVar globalPyLock  $ LockUnlocked
+              writeTVar globalPyLock  $ LockReady n main_lock
         pure $
           (mask_ $ if
             -- On multithreaded runtime create bound thread to make
@@ -496,41 +477,35 @@ runPyInMain :: Py a -> IO a
 runPyInMain py
   -- Multithreaded RTS
   | rtsSupportsBoundThreads = do
-      tid <- myThreadId
-      bracket (acquireMain tid) fst snd
+      tid    <- myThreadId
+      py_tid <- getPyThreadID
+      bracket (acquireMain tid py_tid) fst snd
   -- Single-threaded RTS
   | otherwise = runPy py
   where
-    acquireMain tid = atomically $ readTVar globalPyState >>= \case
+    acquireMain tid py_tid = atomically $ readTVar globalPyState >>= \case
       NotInitialized   -> throwSTM PythonNotInitialized
       InitFailed       -> throwSTM PyInitializationFailed
       Finalized        -> throwSTM PythonIsFinalized
       InInitialization -> retry
       InFinalization   -> retry
       Running1         -> throwSTM $ PyInternalError "runPyInMain: Running1"
-      RunningN _ eval_lock tid_main _ _ -> readTVar globalPyLock >>= \case
+      RunningN _ eval_lock tid_main tid_main_py _ -> readTVar globalPyLock >>= \case
         LockUninialized -> throwSTM PythonNotInitialized
         LockFinalized   -> throwSTM PythonIsFinalized
-        LockedByGC      -> retry
-        -- We need to send closure to main python thread when we're grabbing lock.
-        LockUnlocked    -> do
-          writeTVar globalPyLock $ Locked tid_main []
-          pure ( atomically (releaseLock tid_main)
-               , evalInOtherThread tid_main eval_lock
-               )
-        -- If we can grab lock and main thread taken lock we're
-        -- already executing on main thread. We can simply execute code
-        Locked t ts
-          | t /= tid
-            -> retry
-          | t == tid_main || (tid_main `elem` ts) -> do
-              writeTVar globalPyLock $ Locked t (t : ts)
-              pure ( atomically (releaseLock t)
-                   , unsafeRunPy $ ensureGIL py
-                   )
+        LockReady _ main_lock
+          -- We're on main thread. We can just run computation and not
+          -- bother with incrementing thread counter. It's already
+          -- incremented in outer scope
+          | py_tid == tid_main_py -> pure ( pure ()
+                                          , unsafeRunPy $ ensureGIL py
+                                          )
+          -- Otherwise we need to send closure to main thread for evaluation.
+          -- We use mutex to make sure that only single request is executed
           | otherwise -> do
-              writeTVar globalPyLock $ Locked tid_main (t : ts)
-              pure ( atomically (releaseLock tid_main)
+              takeTMVar main_lock
+              acquireLock tid
+              pure ( atomically (releaseLock tid_main >> putTMVar main_lock ())
                    , evalInOtherThread tid_main eval_lock
                    )
     --
@@ -700,20 +675,16 @@ decrefGC :: Ptr PyObject -> IO ()
 decrefGC p = join $ atomically $ readTVar globalPyLock >>= \case
   LockUninialized -> pure $ pure ()
   LockFinalized   -> pure $ pure ()
-  LockedByGC      -> pure $ pure ()
-  Locked{}        -> retry
-  LockUnlocked    -> do
-    writeTVar globalPyLock LockedByGC
+  LockReady n _   -> do
+    modifyTVar' n succ
     pure $ do
-      gcDecref p `finally` atomically (writeTVar globalPyLock LockUnlocked)
+      gcDecref p `finally` atomically (modifyTVar' n pred)
 
 singleThreadedDecrefCG :: Ptr PyObject -> IO ()
 singleThreadedDecrefCG p = readTVarIO globalPyLock >>= \case
   LockUninialized -> pure ()
   LockFinalized   -> pure ()
-  LockedByGC      -> gcDecref p
-  Locked{}        -> gcDecref p
-  LockUnlocked    -> gcDecref p
+  LockReady{}     -> gcDecref p
 
 gcDecref :: Ptr PyObject -> IO ()
 gcDecref p = [C.block| void {
