@@ -196,8 +196,9 @@ data PyState
     -- ^ Interpreter is running. We're using single threaded RTS
   | RunningN !(Chan (Ptr PyObject))
              !(MVar EvalReq)
-             !ThreadId
-             !ThreadId
+             !ThreadId   -- Haskell ID of main thread
+             !PyThreadId -- Python ID of main thread
+             !ThreadId   -- GC thread ID
     -- ^ Interpreter is running. We're using multithreaded RTS
   | InFinalization
     -- ^ Interpreter is being finalized.
@@ -316,7 +317,7 @@ finalizePython = join $ atomically $ readTVar globalPyState >>= \case
     Py_Finalize();
     } |]
   -- We need to call Py_Finalize on main thread
-  RunningN _ lock_eval _ tid_gc -> checkLock $ do
+  RunningN _ lock_eval _ _ tid_gc -> checkLock $ do
     killThread tid_gc
     resp <- newEmptyMVar
     putMVar lock_eval $ StopReq resp
@@ -363,13 +364,13 @@ doInitializePython = do
                 lock_eval <- newEmptyMVar
                 -- Main thread
                 tid_main <- forkOS $ mainThread lock_init lock_eval
-                takeMVar lock_init >>= \case
-                  True  -> pure ()
-                  False -> throwM PyInitializationFailed
+                tid_py   <- takeMVar lock_init >>= \case
+                  Just tid -> pure tid
+                  Nothing  -> throwM PyInitializationFailed
                 -- GC thread
                 gc_chan <- newChan
                 tid_gc  <- forkOS $ gcThread gc_chan
-                fini $ RunningN gc_chan lock_eval tid_main tid_gc
+                fini $ RunningN gc_chan lock_eval tid_main tid_py tid_gc
             -- Nothing special is needed on single threaded RTS
             | otherwise -> do
                 doInitializePythonIO >>= \case
@@ -379,25 +380,25 @@ doInitializePython = do
           ) `onException` atomically (writeTVar globalPyState InitFailed)
 
 -- This action is executed on python's main thread
-mainThread :: MVar Bool -> MVar EvalReq -> IO ()
+mainThread :: MVar (Maybe PyThreadId) -> MVar EvalReq -> IO ()
 mainThread lock_init lock_eval = do
-  r_init <- doInitializePythonIO
-  putMVar lock_init r_init
-  case r_init of
-    False -> pure ()
-    True  -> mask_ $ fix $ \loop ->
-      (takeMVar lock_eval `catch` (\InterruptMain -> pure HereWeGoAgain)) >>= \case
-        EvalReq py resp -> do
-          res <- (Right <$> runPy py) `catch` (pure . Left)
-          putMVar resp res
-          loop
-        StopReq resp -> do
-          [C.block| void {
-            PyGILState_Ensure();
-            Py_Finalize();
-            } |]
-          putMVar resp ()
-        HereWeGoAgain -> loop
+  doInitializePythonIO >>= \case
+    False -> putMVar lock_init Nothing
+    True  -> do
+      putMVar lock_init . Just =<< getPyThreadID
+      mask_ $ fix $ \loop ->
+        (takeMVar lock_eval `catch` (\InterruptMain -> pure HereWeGoAgain)) >>= \case
+          EvalReq py resp -> do
+            res <- (Right <$> runPy py) `catch` (pure . Left)
+            putMVar resp res
+            loop
+          StopReq resp -> do
+            [C.block| void {
+              PyGILState_Ensure();
+              Py_Finalize();
+              } |]
+            putMVar resp ()
+          HereWeGoAgain -> loop
 
 
 doInitializePythonIO :: IO Bool
@@ -507,7 +508,7 @@ runPyInMain py
       InInitialization -> retry
       InFinalization   -> retry
       Running1         -> throwSTM $ PyInternalError "runPyInMain: Running1"
-      RunningN _ eval_lock tid_main _ -> readTVar globalPyLock >>= \case
+      RunningN _ eval_lock tid_main _ _ -> readTVar globalPyLock >>= \case
         LockUninialized -> throwSTM PythonNotInitialized
         LockFinalized   -> throwSTM PythonIsFinalized
         LockedByGC      -> retry
@@ -684,9 +685,9 @@ newPyObject p = Py $ do
   fptr <- newForeignPtr_ p
   GHC.addForeignPtrFinalizer fptr $
     readTVarIO globalPyState >>= \case
-      RunningN ch _ _ _  -> writeChan ch p
-      Running1           -> singleThreadedDecrefCG p
-      _                  -> pure ()
+      RunningN ch _ _ _ _  -> writeChan ch p
+      Running1             -> singleThreadedDecrefCG p
+      _                    -> pure ()
   pure $ PyObject fptr
 
 -- | Thread doing garbage collection for python object in
