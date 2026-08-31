@@ -244,10 +244,10 @@ releaseLock = readTVar globalPyLock >>= \case
   LockFinalized   -> throwSTM PythonIsFinalized
   LockReady n _   -> modifyTVar' n pred
 
-ensureInit :: STM ()
-ensureInit = readTVar globalPyLock >>= \case
-  LockUninialized -> throwSTM PythonNotInitialized
-  LockFinalized   -> throwSTM PythonIsFinalized
+ensureInit :: IO ()
+ensureInit = readTVarIO globalPyLock >>= \case
+  LockUninialized -> throwM PythonNotInitialized
+  LockFinalized   -> throwM PythonIsFinalized
   LockReady{}     -> pure ()
 
 
@@ -568,7 +568,7 @@ waitPyCatch = (.asyncWait)
 -- | Create new OS thread and execute python code on it.
 runPyAsync :: Py a -> IO (PyAsync a)
 runPyAsync py = do
-  atomically ensureInit
+  ensureInit
   result    <- newEmptyTMVarIO
   py_tid_mv <- newEmptyMVar
   alive     <- newMVar True
