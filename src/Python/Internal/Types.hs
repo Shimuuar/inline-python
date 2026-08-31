@@ -35,10 +35,8 @@ module Python.Internal.Types
   , pattern TRUE
   ) where
 
-import Control.Monad.IO.Class
 import Control.Monad.Catch
 import Control.Monad.Primitive (PrimMonad(..),RealWorld)
-import Control.Exception
 import Data.Coerce
 import Data.Int
 import Data.Word
