@@ -8,7 +8,6 @@
 module Python.Internal.Eval
   ( -- * Locks
     ensurePyLock
-  , callbackEnsurePyLock
     -- * Initialization
   , initializePython
   , finalizePython
@@ -229,34 +228,18 @@ data PyLock
 
 -- | Execute code ensuring that python lock is held by current thread.
 ensurePyLock :: IO a -> IO a
-ensurePyLock action = do
-  tid <- myThreadId
-  bracket_ (atomically $ acquireLock tid)
-           (atomically $ releaseLock tid)
-           action
+ensurePyLock = bracket_
+  (atomically acquireLock)
+  (atomically releaseLock)
 
--- | Retake lock regardless of thread which hold lock. Lock must be
---   already taken. Caller must make sure that thread holding lock is
---   block for duration of action.
---
---   This is very unsafe. It must be used only in callbacks from
---   python to haskell
-callbackEnsurePyLock :: IO a -> IO a
-callbackEnsurePyLock action = do
-  tid <- myThreadId
-  bracket_ (atomically $ acquireLock tid)
-           (atomically $ releaseLock tid)
-           action
-
-
-acquireLock :: ThreadId -> STM ()
-acquireLock tid = readTVar globalPyLock >>= \case
+acquireLock :: STM ()
+acquireLock = readTVar globalPyLock >>= \case
   LockUninialized -> throwSTM PythonNotInitialized
   LockFinalized   -> throwSTM PythonIsFinalized
   LockReady n _   -> modifyTVar' n succ
 
-releaseLock :: ThreadId -> STM ()
-releaseLock tid = readTVar globalPyLock >>= \case
+releaseLock :: STM ()
+releaseLock = readTVar globalPyLock >>= \case
   LockUninialized -> throwSTM PythonNotInitialized
   LockFinalized   -> throwSTM PythonIsFinalized
   LockReady n _   -> modifyTVar' n pred
@@ -477,13 +460,12 @@ runPyInMain :: Py a -> IO a
 runPyInMain py
   -- Multithreaded RTS
   | rtsSupportsBoundThreads = do
-      tid    <- myThreadId
       py_tid <- getPyThreadID
-      bracket (acquireMain tid py_tid) fst snd
+      bracket (acquireMain py_tid) fst snd
   -- Single-threaded RTS
   | otherwise = runPy py
   where
-    acquireMain tid py_tid = atomically $ readTVar globalPyState >>= \case
+    acquireMain py_tid = atomically $ readTVar globalPyState >>= \case
       NotInitialized   -> throwSTM PythonNotInitialized
       InitFailed       -> throwSTM PyInitializationFailed
       Finalized        -> throwSTM PythonIsFinalized
@@ -504,8 +486,8 @@ runPyInMain py
           -- We use mutex to make sure that only single request is executed
           | otherwise -> do
               takeTMVar main_lock
-              acquireLock tid
-              pure ( atomically (releaseLock tid_main >> putTMVar main_lock ())
+              acquireLock
+              pure ( atomically (releaseLock >> putTMVar main_lock ())
                    , evalInOtherThread tid_main eval_lock
                    )
     --
