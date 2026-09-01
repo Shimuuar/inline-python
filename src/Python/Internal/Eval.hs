@@ -105,18 +105,19 @@ C.include "<inline-python.h>"
 -- Haskell has two runtimes. Single threaded one doesn't cause any
 -- troubles and won't be discussed further. Multithreaded one
 -- implement N-M threading and schedules N green thread on M OS
--- threads as it see fit.
+-- threads as GHC RTS sees fit.
 --
--- Another problem is GHC may schedule two threads each running python
--- code on same capability. It seems very likely that they'll step on
--- each others' toes.
+-- Runtime may migrate haskell threads between OS threads freely so
+-- consecutive calls to python may happen in different threads. This
+-- doesn't seem to cause problems so far. In similar way several
+-- threads may interleave calls to python in single OS
+-- thread. Hopefully it won't cause problems either.
 --
--- Current solution is to protect execution of python code with global
--- lock. Since it's visible to haskell RTS we don't get deadlocks.
--- This also means we can't execute python code concurrently.
+-- Pre 0.3 version had a global lock allowing only single runPy to
+-- execute at any time.
 --
--- There's support for running python code concurrently but it's very
--- experimental. See NOTE [Py Async] for details
+-- For uses where serious concurrency is required runPyAsync machinery
+-- should be used. See NOTE [Py Async] for details.
 
 
 
@@ -153,20 +154,46 @@ C.include "<inline-python.h>"
 -- NOTE: [Interrupting python]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 --
--- Being able to interrupt python when haskell exception arrives is
--- surely nice. However it's difficult and comes with tradeoffs.
+-- Interrupting program that mixes python and haskell code is in fact
+-- very difficult.
 --
--- First of all call must be done in a separate thread otherwise
--- there's no one to catch exception and to something. This also means
--- that python calls made using plain FFI are not interruptible.
+--  + Haskell code cannot receive exceptions while in foreign call.
 --
--- In addition python's ability to notify other threads are limited:
+--  + Haskell callback from python created new lightweight
+--    thread. Thus we cannot interrupt callback thread since we need
+--    to know its thread ID.
 --
 --  + `Py_SetInterrupt` plain doesn't work. It uses signal which trips
 --    up haskell RTS as well.
 --
---  + `PyThreadState_SetAsyncExc` could be use but it requires special
---    setup from thread being interrupted.
+--  + `PyThreadState_SetAsyncExc` uses OS thread id (or something
+--    similar) as a key. So we must execute code in a bound thread and
+--    be sure that no other haskell thread (except callbacks) uses it.
+--
+-- Together this means it's only possible to interrupt python when
+-- it's called in dedicated OS thread. Such as created by `runPyAsync`
+-- or in main thread. To do this we need thread ID as used by python.
+--
+-- To interrupt haskell, whether thread we spawned or any callback
+-- we'll have to maintain stack of thread IDs somehow. Obvoiusly
+-- such stack has to be done by callback.
+--
+-- And even if we do have stack we can't reliably interrupt callbacks
+-- due to asynchrony. We may look at stack just before callbacks TID
+-- is pushed onto it. In that case we'll try interrupt parent
+-- thread. Or we can use its value just before TID is popped. In that
+-- case we'll interrupt thread that's about to stop or stopped
+-- already.
+--
+-- So it seems only way of dealing with this problem is to try to kill
+-- thread on top of stack and whenever new thread appear on top of
+-- stack. 
+--
+--
+-- As for runPy it seems there's simply no way to forcefully interrupt
+-- computation. So it's not interruptible.
+
+
 
 
 
@@ -188,7 +215,8 @@ data PyState
   = NotInitialized
     -- ^ Initialization is not done. Initial state.
   | InInitialization
-    -- ^ Interpreter is being initialized.
+    -- ^ Interpreter is being initialized. This state is required in
+    --   case initialization is started from different threads.
   | InitFailed
     -- ^ Initialization was attempted but failed for whatever reason.
   | Running1
