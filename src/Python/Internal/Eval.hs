@@ -653,7 +653,7 @@ cancelPy PyAsync{asyncTID=tid, asyncTidStack, asyncPyTID, asyncAlive} = do
       False -> return 1
       True  -> [C.block| int {
         int gil = PyGILState_Ensure();
-        int n   = PyThreadState_SetAsyncExc($(uint64_t py_tid), inline_py_AsyncError());
+        int n   = PyThreadState_SetAsyncExc($(uint64_t py_tid), inline_py_AsyncCancelled());
         PyGILState_Release(gil);
         return n;
         }|]
@@ -789,10 +789,10 @@ convertPy2Haskell = runProgram $ do
     p_type  <- peekElemOff p_errors 0
     -- NOTE: When we set exception using PyThreadState_SetAsyncExc
     --       this field remains NULL on python<=3.11. In this case we
-    --       assume it's our AsyncError:
+    --       assume it's our AsyncCancelled:
     p_value <- peekElemOff p_errors 1 >>= \case
       NULL -> [CU.block| PyObject* {
-        PyObject *err_class = inline_py_AsyncError();
+        PyObject *err_class = inline_py_AsyncCancelled();
         PyObject *tuple     = PyTuple_New(0);
         PyObject *err       = PyObject_Call(err_class, tuple, NULL);
         Py_DECREF(tuple);

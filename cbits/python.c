@@ -212,17 +212,6 @@ void inline_py_Integer_FromPy(
 }
 
 
-
-static PyObject* AsyncError = 0;
-
-PyObject* inline_py_AsyncError() {
-    if( AsyncError == 0 ) {
-        AsyncError = PyErr_NewException("inline_py.AsyncError", PyExc_BaseException, 0);
-    }
-    return AsyncError;
-}
-
-
 static Py_tss_t key_py_async = Py_tss_NEEDS_INIT;
 
 void inline_py_init_state(void *stack) {
@@ -257,11 +246,34 @@ void inline_py_initialize(void) {
 // ================================================================
 // inline_python module
 
+PyObject* inline_py_AsyncCancelled() {
+    static PyObject* AsyncCancelled = 0;
+    if( AsyncCancelled == 0 ) {
+        AsyncCancelled = PyErr_NewException("inline_python.AsyncCancelled", PyExc_BaseException, 0);
+    }
+    return AsyncCancelled;
+}
+
 static PyMethodDef inline_python_methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
+static int inline_python_module_exec(PyObject *m) {
+    // Initialize module only once
+    static int initialized = 0;
+    if( initialized ) {
+        return 0;
+    }
+    initialized = 1;
+    //
+    if (PyModule_AddObjectRef(m, "AsyncCancelled", inline_py_AsyncCancelled()) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static PyModuleDef_Slot inline_python_module_slots[] = {
+    {Py_mod_exec, inline_python_module_exec},
     {0, NULL}
 };
 
