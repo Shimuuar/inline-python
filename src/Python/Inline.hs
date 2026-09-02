@@ -132,21 +132,24 @@ import Python.Internal.Eval
 -- 3. __Linker error in GHCi__
 --
 -- Attempting to import library using C extensions from ghci may
--- result in linker failing to find symbols from @libpython@ like
--- @PyFloat_Type@ or some other. There are multiples known workarounds:
+-- result in linker failing to find symbols from @libpython3@ like
+-- @PyFloat_Type@ or some other. There are multiples known
+-- workarounds. @libpython3.XX.so@ should be one @inline-python@ was
+-- built with.
 --
---
--- - export @LD_PRELOAD=/path/to/libpython3.XX.so@ environment variable. This
+-- - export @LD_PRELOAD=\/path\/to\/libpython3.XX.so@ environment variable. This
 -- works fine most of the time but it will also impact programs called from
 -- your repl (e.g. using 'process').
+--
 -- - you can load the relevant symbol only in the current process space using
 -- 
--- > System.Posix.DynamicLinker.dlopen "/path/to/lib/libpython3.XX.so" [System.Posix.DynamicLinker.RTLD_NOW, System.Posix.DynamicLinker.RTLD_GLOBAL]
+-- > System.Posix.DynamicLinker.dlopen "/path/to/libpython3.XX.so" [System.Posix.DynamicLinker.RTLD_NOW, System.Posix.DynamicLinker.RTLD_GLOBAL]
 --
 -- Note that in ghci, you don't need to explicitly import
 -- "System.Posix.DynamicLinker" to run this command. If you use this
--- extensively in your project, it is recommended to add that in your @.ghci@,
--- either as an unconditionally executed command, or as a macro, such as:
+-- extensively in your project, it is recommended to add that in your
+-- @.ghci@, global or local, either as an unconditionally executed
+-- command, or as a macro, such as:
 --
 -- > :def setupPythonDLL \_ -> "" <$ System.Posix.DynamicLinker.dlopen "path/to//lib/libpython3.so" [System.Posix.DynamicLinker.RTLD_NOW, System.Posix.DynamicLinker.RTLD_GLOBAL]@
 --
@@ -166,7 +169,7 @@ import Python.Internal.Eval
 -- >           import mylib
 -- >
 -- >           # This force reloads mylib
--- >           importlib.reload(run_saem)
+-- >           importlib.reload(mylib)
 -- >       |]
 -- 
 --
