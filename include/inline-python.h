@@ -17,6 +17,8 @@ typedef _PyCFunctionFast PyCFunctionFast;
 #define Py_IsFinalizing(x) 0
 #endif
 
+// General initialization of internal on C side
+void inline_py_initialize(void);
 
 
 // ================================================================

@@ -226,16 +226,30 @@ PyObject* inline_py_AsyncError() {
 static Py_tss_t key_py_async = Py_tss_NEEDS_INIT;
 
 void inline_py_init_state(void *stack) {
-    // FIXME: error checking
-    PyThread_tss_create(&key_py_async);
-    PyThread_tss_set(&key_py_async, stack);
+    int r = PyThread_tss_set(&key_py_async, stack);
+    if( 0 != r ) {
+        fprintf(stderr, "inline-python: fatal error: setting thread local storage failed\n");
+        exit(1);
+    }
 }
 
 void inline_py_free_state(void) {
-    // FIXME: error checking
-    PyThread_tss_set(&key_py_async, NULL);
+    int r = PyThread_tss_set(&key_py_async, NULL);
+    if( 0 != r ) {
+        fprintf(stderr, "inline-python: fatal error: setting thread local storage failed\n");
+        exit(1);
+    }
 }
 
 void* inline_py_get_state(void) {
     return PyThread_tss_get(&key_py_async);
+}
+
+
+void inline_py_initialize(void) {
+    int r = PyThread_tss_create(&key_py_async);
+    if( 0 != r ) {
+        fprintf(stderr, "inline-python: fatal error: Failed to initialized thread local storage\n");
+        exit(1);
+    }
 }

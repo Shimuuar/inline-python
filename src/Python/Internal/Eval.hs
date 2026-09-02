@@ -443,6 +443,8 @@ doInitializePythonIO = do
               PyErr_Clear();
           }
       }
+      // Initialize internals
+      inline_py_initialize();
       // Release GIL so other threads may take it
       PyEval_SaveThread();
       return 0;
