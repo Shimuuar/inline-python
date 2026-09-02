@@ -14,6 +14,8 @@ module Python.Inline.Literal
   , fromPy'
   ) where
 
+import Control.Concurrent
+import Control.Concurrent.STM
 import Control.Exception           (evaluate)
 import Control.Monad
 import Control.Monad.Catch
@@ -44,6 +46,7 @@ import Numeric.Natural             (Natural)
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.Storable
+import Foreign.StablePtr
 import Foreign.Marshal.Alloc     (alloca,mallocBytes)
 import Foreign.Marshal.Utils     (copyBytes)
 import GHC.Float                 (float2Double, double2Float)
@@ -925,7 +928,27 @@ instance (FromPy a1, FromPy a2, ToPy b) => ToPy (a1 -> a2 -> Py b) where
 
 -- | Execute haskell callback function
 pyCallback :: Program (Ptr PyObject) (Ptr PyObject) -> IO (Ptr PyObject)
-pyCallback io = callbackEnsurePyLock $ unsafeRunPy $ ensureGIL $ runProgram io `catch` convertHaskell2Py
+pyCallback io
+  = mask_
+  $ withCallbackStack
+  $ unsafeRunPy
+  $ ensureGIL
+  $ runProgram io `catch` convertHaskell2Py
+
+withCallbackStack :: IO a -> IO a
+withCallbackStack = bracket ini fini . const where
+  ini = [CU.exp| void* { inline_py_get_state() } |] >>= \case
+    NULL -> return NULL
+    ptr  -> do
+      tid   <- myThreadId
+      stack <- deRefStablePtr $ castPtrToStablePtr ptr
+      atomically $ modifyTVar' stack (tid:)
+      return ptr
+  fini NULL = return ()
+  fini ptr  = do
+    stack <- deRefStablePtr $ castPtrToStablePtr ptr
+    atomically $ modifyTVar' stack (drop 1)
+
 
 -- | Load argument from python object for haskell evaluation
 loadArg

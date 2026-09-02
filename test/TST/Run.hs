@@ -185,6 +185,7 @@ tests = testGroup "Run python"
               time.sleep(1e-3)
           |]
         d <- registerDelay 100_000
+        threadDelay 100 -- Wait to make sure execution actually started
         cancelPy a
         _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
                                                       True  -> error "Timeout"
@@ -195,7 +196,20 @@ tests = testGroup "Run python"
         a <- runPyAsync $ do
           liftIO $ forever $ threadDelay 1_000_000
         d <- registerDelay 100_000
+        threadDelay 100
         cancelPy a
+        _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
+                                                      True  -> error "Timeout"
+                                                      False -> retry
+        return ()
+    , -- Cancellation of haskell code
+      testCase "cancelPy [callback]" $ do
+        a <- runPyAsync $ do
+          let loop = forever $ threadDelay 1_000_000 :: IO ()
+          forever [py_| loop_hs() |]
+        d <- registerDelay 100_000
+        threadDelay 100
+        forkIO $ cancelPy a
         _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
                                                       True  -> error "Timeout"
                                                       False -> retry

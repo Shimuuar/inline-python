@@ -15,6 +15,7 @@ module Python.Internal.Types
   , PyError(..)
   , PyException(..)
   , PyInternalError(..)
+  , PyThreadId(..)
   , Py(..)
   , pyIO
     -- ** Python code wrappers
@@ -34,12 +35,11 @@ module Python.Internal.Types
   , pattern TRUE
   ) where
 
-import Control.Monad.IO.Class
 import Control.Monad.Catch
 import Control.Monad.Primitive (PrimMonad(..),RealWorld)
-import Control.Exception
 import Data.Coerce
 import Data.Int
+import Data.Word
 import Data.ByteString             qualified as BS
 import Data.Map.Strict             qualified as Map
 import Data.Text                   qualified as T
@@ -124,6 +124,11 @@ instance PrimMonad Py where
   type PrimState Py = RealWorld
   primitive = Py . primitive
   {-# INLINE primitive #-}
+
+
+-- | Identifier of python's thread as python understands them.
+newtype PyThreadId = PyThreadId Word64
+  deriving stock (Show,Eq,Ord)
 
 
 ----------------------------------------------------------------
