@@ -262,8 +262,7 @@ typedef struct {
 
 static void haskell_error_dealloc(PyObject *op) {
     HaskellError *self = (HaskellError*) op;
-    // FIXME: I should free stable ptr here
-    printf("haskell_error_dealloc\n");
+    hs_free_stable_ptr(self->exception_stableptr);
     Py_TYPE(self)->tp_free(self);
 }
 
