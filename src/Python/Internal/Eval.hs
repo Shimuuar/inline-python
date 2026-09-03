@@ -444,8 +444,12 @@ doInitializePythonIO = do
               PyErr_Clear();
           }
       }
-      // Initialize internals
+      // Initialize internals. We also need to import module with our internals
       inline_py_initialize();
+      PyObject *inline_python = PyImport_ImportModule("inline_python");
+      if( PyErr_Occurred() ) {
+          PyErr_Clear();
+      }
       // Release GIL so other threads may take it
       PyEval_SaveThread();
       return 0;

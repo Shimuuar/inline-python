@@ -12,10 +12,13 @@ import Python.Inline.Async
 tests :: TestTree
 tests = testGroup "Builtin module"
   [ testCase "Module exists" $ runPy [py_| import inline_python |]
-  , testCase "AsyncCancelled" $ runPy [py_|
+  , testCase "Exceptions" $ runPy [py_|
       import inline_python
       assert issubclass(inline_python.AsyncCancelled, BaseException)
       assert not issubclass(inline_python.AsyncCancelled, Exception)
+
+      assert issubclass(inline_python.HaskellError, Exception),     "HaskellError is Exception"
+      assert issubclass(inline_python.HaskellError, BaseException), "HaskellError is BaseException"
       |]
     -- We want to check that inline_python types are stable under
     -- reload using importlib.

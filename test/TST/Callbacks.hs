@@ -1,6 +1,7 @@
 -- |
 module TST.Callbacks (tests) where
 
+import Control.Exception
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
@@ -68,11 +69,11 @@ tests = testGroup "Callbacks"
   , testCase "Haskell exception in callback(arity=1)" $ runPy $ do
        let foo :: Int -> IO Int
            foo y = pure $ 10 `div` y
-       throwsPy [py_| foo_hs(0) |]
+       throwsException DivideByZero [py_| foo_hs(0) |]
   , testCase "Haskell exception in callback(arity=2)" $ runPy $ do
       let foo :: Int -> Int -> IO Int
           foo x y = pure $ x `div` y
-      throwsPy [py_| foo_hs(1, 0) |]
+      throwsException DivideByZero [py_| foo_hs(1, 0) |]
     ----------------------------------------
   , testCase "Call python in callback (arity=1)" $ runPy $ do
       let foo :: Int -> IO Int
