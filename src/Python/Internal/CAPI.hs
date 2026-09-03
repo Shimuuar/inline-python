@@ -4,6 +4,7 @@
 -- Thin wrappers over C API
 module Python.Internal.CAPI
   ( decref
+  , xdecref
   , incref
     -- * Simple wrappers
   , basicNewDict
@@ -28,6 +29,9 @@ C.include "<inline-python.h>"
 
 decref :: Ptr PyObject -> Py ()
 decref p = Py [C.exp| void { Py_DECREF($(PyObject* p)) } |]
+
+xdecref :: Ptr PyObject -> Py ()
+xdecref p = Py [C.exp| void { Py_XDECREF($(PyObject* p)) } |]
 
 incref :: Ptr PyObject -> Py ()
 incref p = Py [CU.exp| void { Py_INCREF($(PyObject* p)) } |]
