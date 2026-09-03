@@ -101,5 +101,11 @@ void* inline_py_get_state(void);
 
 
 
+// ================================================================
+// inline_python module
+// ================================================================
+
+PyMODINIT_FUNC PyInit_inline_python(void);
+
 // Obtain class for async exception
-PyObject* inline_py_AsyncError();
+PyObject* inline_py_AsyncCancelled();

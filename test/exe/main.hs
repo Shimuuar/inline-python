@@ -7,6 +7,7 @@ import TST.FromPy
 import TST.ToPy
 import TST.Callbacks
 import TST.Roundtrip
+import TST.Module
 import Python.Inline
 
 main :: IO ()
@@ -16,4 +17,5 @@ main = withPython $ defaultMain $ testGroup "PY"
   , TST.ToPy.tests
   , TST.Roundtrip.tests
   , TST.Callbacks.tests
+  , TST.Module.tests
   ]
