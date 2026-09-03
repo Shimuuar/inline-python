@@ -68,7 +68,6 @@ import Foreign.Ptr
 import Foreign.ForeignPtr
 import Foreign.StablePtr
 import Foreign.C.Types
-import Foreign.C.String
 import Foreign.Marshal.Array
 import Foreign.Storable
 import System.Environment
@@ -769,11 +768,14 @@ getPyThreadID = PyThreadId <$> [CU.exp| uint64_t { PyThread_get_thread_ident() }
 --   NULL.
 convertHaskell2Py :: SomeException -> Py (Ptr PyObject)
 convertHaskell2Py err = Py $ do
-  withCString ("Haskell exception: "++show err) $ \p_err -> do
-    [C.block| PyObject* {
-      PyErr_SetString(PyExc_RuntimeError, $(char *p_err));
-      return NULL;
-      } |]
+  s_ptr <- newStablePtr err
+  let ptr = castStablePtrToPtr s_ptr
+  [C.block| PyObject* {
+    PyObject* exc = inline_py_HaskellError_create($(void* ptr));
+    PyErr_SetObject(inline_py_HaskellError(), exc);
+    Py_DECREF(exc);
+    return NULL;
+    } |]
 
 -- | Convert python exception to haskell exception. Should only be
 --   called if there's unhandled python exception. Clears exception.
@@ -785,20 +787,28 @@ convertPy2Haskell = runProgram $ do
     PyObject **p = $(PyObject** p_errors);
     PyErr_Fetch(p, p+1, p+2);
     }|]
-  -- Fetch exception type. Convert exceptions of proper
-  p_type             <- progIO $ peekElemOff p_errors 0
-  ty_async_cancelled <- progIO $ [CU.exp| PyObject* { inline_py_AsyncCancelled() } |]
-  when (p_type == ty_async_cancelled) $
-    abort $ SomeException PyAsyncCancelled
-  -- Convert exception type and value to strings.
+  -- Fetch exception type.
   --
   -- NOTE: When we set exception using PyThreadState_SetAsyncExc this
-  --       field remains NULL on python<=3.11. But that should cause
-  --       no problem since we handle this case directly above.
+  --       field remains NULL on python<=3.11. Thus we must use xdecref
+  p_type  <- progPyBracket $ (Py $ peekElemOff p_errors 0) `bracket` decref
+  p_value <- progPyBracket $ (Py $ peekElemOff p_errors 1) `bracket` xdecref
+  _trace  <- progPyBracket $ (Py $ peekElemOff p_errors 2) `bracket` xdecref
+  -- Should we convert to PyAsyncCancelled?
+  ty_async_cancelled <- progIO [CU.exp| PyObject* { inline_py_AsyncCancelled() } |]
+  when (p_type == ty_async_cancelled) $ do
+    abort $ SomeException PyAsyncCancelled
+  -- Should we convert to haskell exception?
+  ty_hask_err <- progIO [CU.exp| PyObject* { inline_py_HaskellError() } |]
+  when (p_type == ty_hask_err) $ do
+    s_ptr <- progIO [CU.exp| void* { inline_py_HaskellError_get_stableptr($(PyObject* p_value)) } |]
+    err   <- progIO $ deRefStablePtr $ castPtrToStablePtr s_ptr
+    abort err
+  -- Convert any other python exception
   progPy $ do
-    p_value <- Py $ peekElemOff p_errors 1
     s_type  <- pyobjectStrAsHask p_type
     s_value <- pyobjectStrAsHask p_value
+    incref p_value
     exc     <- newPyObject p_value
     let bad_str = "__str__ call failed"
     pure $ SomeException $ PyError $ PyException
