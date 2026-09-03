@@ -1,11 +1,13 @@
 -- |
 module TST.Module where
 
+import Control.Exception
+import Data.Typeable
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
 import Python.Inline.QQ
-
+import Python.Inline.Async
 
 tests :: TestTree
 tests = testGroup "Builtin module"
@@ -26,4 +28,14 @@ tests = testGroup "Builtin module"
       assert ty is inline_python.AsyncCancelled
       assert isinstance(err, inline_python.AsyncCancelled)
       |]
+  , testCase "AsyncCancelled is converted to PyAsyncCancelled" $ do
+    r :: Either SomeException () <- try $ runPy [py_|
+      import inline_python
+      raise inline_python.AsyncCancelled()
+      |]
+    case r of
+      Right () -> error "No exception"
+      Left  (SomeException e)
+        | Just PyAsyncCancelled <- cast e -> pure ()
+        | otherwise                       -> throwIO e
   ]

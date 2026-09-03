@@ -777,38 +777,32 @@ convertHaskell2Py err = Py $ do
 
 -- | Convert python exception to haskell exception. Should only be
 --   called if there's unhandled python exception. Clears exception.
-convertPy2Haskell :: Py PyException
+convertPy2Haskell :: Py SomeException
 convertPy2Haskell = runProgram $ do
   p_errors <- withPyAllocaArray @(Ptr PyObject) 3
-  -- Fetch error indicator
-  (p_type, p_value) <- progIO $ do
-    [CU.block| void {
-       PyObject **p = $(PyObject** p_errors);
-       PyErr_Fetch(p, p+1, p+2);
-       }|]
-    p_type  <- peekElemOff p_errors 0
-    -- NOTE: When we set exception using PyThreadState_SetAsyncExc
-    --       this field remains NULL on python<=3.11. In this case we
-    --       assume it's our AsyncCancelled:
-    p_value <- peekElemOff p_errors 1 >>= \case
-      NULL -> [CU.block| PyObject* {
-        PyObject *err_class = inline_py_AsyncCancelled();
-        PyObject *tuple     = PyTuple_New(0);
-        PyObject *err       = PyObject_Call(err_class, tuple, NULL);
-        Py_DECREF(tuple);
-        return err;
-        } |]
-      p    -> pure p
-    -- Traceback is not used ATM
-    pure (p_type,p_value)
+  -- Fetch error information
+  progIO [CU.block| void {
+    PyObject **p = $(PyObject** p_errors);
+    PyErr_Fetch(p, p+1, p+2);
+    }|]
+  -- Fetch exception type. Convert exceptions of proper
+  p_type             <- progIO $ peekElemOff p_errors 0
+  ty_async_cancelled <- progIO $ [CU.exp| PyObject* { inline_py_AsyncCancelled() } |]
+  when (p_type == ty_async_cancelled) $
+    abort $ SomeException PyAsyncCancelled
   -- Convert exception type and value to strings.
+  --
+  -- NOTE: When we set exception using PyThreadState_SetAsyncExc this
+  --       field remains NULL on python<=3.11. But that should cause
+  --       no problem since we handle this case directly above.
   progPy $ do
+    p_value <- Py $ peekElemOff p_errors 1
     s_type  <- pyobjectStrAsHask p_type
     s_value <- pyobjectStrAsHask p_value
     incref p_value
     exc     <- newPyObject p_value
     let bad_str = "__str__ call failed"
-    pure $ PyException
+    pure $ SomeException $ PyError $ PyException
       { ty        = fromMaybe bad_str s_type
       , str       = fromMaybe bad_str s_value
       , exception = exc
@@ -819,7 +813,7 @@ checkThrowPyError :: Py ()
 checkThrowPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> pure ()
-    _    -> throwM . PyError =<< convertPy2Haskell
+    _    -> throwM =<< convertPy2Haskell
 
 -- | Throw python error as haskell exception if it's raised. If it's
 --   not that internal error. Another exception will be raised
@@ -827,7 +821,7 @@ mustThrowPyError :: Py a
 mustThrowPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> error $ "mustThrowPyError: no python exception raised."
-    _    -> throwM . PyError =<< convertPy2Haskell
+    _    -> throwM =<< convertPy2Haskell
 
 -- | Calls mustThrowPyError if pointer is null or returns it unchanged
 throwOnNULL :: Ptr PyObject -> Py (Ptr PyObject)
