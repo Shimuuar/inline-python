@@ -799,7 +799,6 @@ convertPy2Haskell = runProgram $ do
     p_value <- Py $ peekElemOff p_errors 1
     s_type  <- pyobjectStrAsHask p_type
     s_value <- pyobjectStrAsHask p_value
-    incref p_value
     exc     <- newPyObject p_value
     let bad_str = "__str__ call failed"
     pure $ SomeException $ PyError $ PyException
