@@ -1,0 +1,52 @@
+Cabal-Version:  2.2
+Name:           matplotlib-gui
+Version:        0.1
+Synopsis:       Wrapper and tk-based GUI for matplotlib
+Description:
+  This is high level wrapper which tries to provide
+  
+  tries to make idiomatic API for 
+
+
+
+License:        BSD-3-Clause
+License-File:   LICENSE
+Author:         Aleksey Khudyakov <alexey.skladnoy@gmail.com>
+Maintainer:     Aleksey Khudyakov <alexey.skladnoy@gmail.com>
+Category:       Data
+Build-Type:     Simple
+
+Library
+  Ghc-options:        -Wall -Werror=missing-methods -O2
+  Default-Language:   GHC2021
+  Default-Extensions: NoPolyKinds
+                      --
+                      DataKinds
+                      DeriveAnyClass
+                      DerivingStrategies
+                      DerivingVia
+                      LambdaCase
+                      MultiWayIf
+                      NegativeLiterals
+                      PatternSynonyms
+                      ViewPatterns
+                      --
+                      OverloadedRecordDot
+                      NoFieldSelectors
+                      DuplicateRecordFields
+  --
+  pkgconfig-depends: python3-embed
+  hs-source-dirs:   src
+  Build-Depends:    base         >=4.12 && <5
+                  , inline-python
+                  , text
+                  , bytestring
+                  , transformers
+                  , async
+                  , stm
+                  , unix
+                  , template-haskell
+  Exposed-modules:
+        Py.Matplotlib.GUI
+        Py.Matplotlib
+        Py.Extra
