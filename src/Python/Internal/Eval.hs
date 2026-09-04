@@ -55,7 +55,8 @@ module Python.Internal.Eval
 
 import Control.Concurrent
 import Control.Concurrent.STM
-import Control.Exception         (interruptible)
+import Control.Exception         (interruptible,evaluate)
+import Control.DeepSeq
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
@@ -63,6 +64,7 @@ import Control.Monad.Trans.Cont
 import Data.Maybe
 import Data.Function
 import Data.ByteString.Unsafe    qualified as BS
+import Data.Typeable
 import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -399,13 +401,16 @@ doInitializePythonIO = do
   argv0 <- getProgName
   argv  <- getArgs
   let n_argv = fromIntegral $ length argv + 1
-  -- FIXME: For some reason sys.argv is initialized incorrectly. No
-  --        easy way to debug. Will do for now
+  hask_err_repr   <- wrapReprFromStablePtr haskellErrorRepr
+  hask_err_tyrepr <- wrapReprFromStablePtr haskellErrorTyRepr
   r <- evalContT $ do
     p_argv0  <- ContT $ withWCString argv0
     p_argv   <- traverse (ContT . withWCString) argv
     ptr_argv <- ContT $ withArray (p_argv0 : p_argv)
     liftIO [C.block| int {
+      // Set global constants
+      inline_py_haskell_error_repr   = $(PyObject* (*hask_err_repr)(void*));
+      inline_py_haskell_error_tyrepr = $(PyObject* (*hask_err_tyrepr)(void*));
       // Now fill config
       PyStatus status;
       PyConfig cfg;
@@ -459,6 +464,30 @@ doInitializePythonIO = do
       return 1;
       } |]
   return $! r == 0
+
+haskellErrorRepr :: Ptr () -> IO (Ptr PyObject)
+haskellErrorRepr ptr = unsafeRunPy $ runProgram $ do
+  SomeException err <- progIO $ deRefStablePtr $ castPtrToStablePtr ptr
+  -- We need to make sure that we evaluated string so that we won't
+  -- leak exceptions
+  repr  <- progIO $ evaluate $ force $ show err
+  p_str <- withPyWCString repr
+  progIO [CU.exp| PyObject* { PyUnicode_FromWideChar($(wchar_t *p_str), -1) } |]
+
+haskellErrorTyRepr :: Ptr () -> IO (Ptr PyObject)
+haskellErrorTyRepr ptr = unsafeRunPy $ runProgram $ do
+  SomeException err <- progIO $ deRefStablePtr $ castPtrToStablePtr ptr
+  -- We need to make sure that we evaluated string so that we won't
+  -- leak exceptions
+  repr  <- progIO $ evaluate $ force $ show $ typeOf err
+  p_str <- withPyWCString repr
+  progIO [CU.exp| PyObject* { PyUnicode_FromWideChar($(wchar_t *p_str), -1) } |]
+
+type FunWrapper a = a -> IO (FunPtr a)
+
+foreign import ccall "wrapper" wrapReprFromStablePtr
+  :: FunWrapper (Ptr () -> IO (Ptr PyObject))
+
 
 
 ----------------------------------------------------------------

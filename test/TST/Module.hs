@@ -41,23 +41,4 @@ tests = testGroup "Builtin module"
       Left  (SomeException e)
         | Just PyAsyncCancelled <- cast e -> pure ()
         | otherwise                       -> throwIO e
-  , testCase "Haskell exception are converted 1" $ do
-      let foo :: IO Int
-          foo = return $! 1 `div` 0
-      runPy [py_|
-                try:
-                    foo_hs()
-                except Exception as e:
-                    pass
-                    del e
-                    #print(e)
-                    #print(type(e))
-               |]
-  , testCase "Haskell exception are converted 2" $ do
-      let foo :: IO Int
-          foo = return $! 1 `div` 0
-      let handler DivideByZero = pure ()
-          handler e            = throwIO e
-      runPy [py_| foo_hs() |] `catch` handler
-
   ]

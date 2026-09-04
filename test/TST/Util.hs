@@ -15,7 +15,7 @@ throwsPy io = (io >> liftIO (assertFailure "Evaluation should raise python excep
 throwsException :: (Exception e, Eq e) => e -> Py () -> Py ()
 throwsException e0 io = (io >> liftIO (assertFailure "Evaluation should raise python exception"))
   `catch` (\(SomeException e) -> case cast e of Just e' | e' == e0 -> pure ()
-                                                Nothing            -> throwM e
+                                                _                  -> throwM e
           )
 
 throwsPyIO :: IO () -> IO ()

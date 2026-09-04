@@ -74,6 +74,16 @@ tests = testGroup "Callbacks"
       let foo :: Int -> Int -> IO Int
           foo x y = pure $ x `div` y
       throwsException DivideByZero [py_| foo_hs(1, 0) |]
+  , testCase "Haskell exception has correct type" $ runPy $ do
+       let foo :: Int -> IO Int
+           foo y = pure $ 10 `div` y
+       [py_|
+         import inline_python
+         try:
+             foo_hs(0)
+         except inline_python.HaskellError as e:
+             assert repr(e) == "<inline_python.HaskellError: ArithException: divide by zero>", repr(e)
+         |]
     ----------------------------------------
   , testCase "Call python in callback (arity=1)" $ runPy $ do
       let foo :: Int -> IO Int

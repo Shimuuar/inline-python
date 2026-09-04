@@ -69,6 +69,7 @@ Library
   import:            language
   Build-Depends:     base             >=4.15 && <5
                    , primitive        >=0.6.2
+                   , deepseq          >=1.4
                    , vector           >=0.13.2
                    , containers       >=0.5
                    , process

@@ -246,6 +246,9 @@ void inline_py_initialize(void) {
 // ================================================================
 // inline_python module
 
+PyObject* (*inline_py_haskell_error_repr)(void*);
+PyObject* (*inline_py_haskell_error_tyrepr)(void*);
+
 PyObject* inline_py_AsyncCancelled() {
     static PyObject* AsyncCancelled = 0;
     if( AsyncCancelled == 0 ) {
@@ -253,7 +256,6 @@ PyObject* inline_py_AsyncCancelled() {
     }
     return AsyncCancelled;
 }
-
 
 typedef struct {
     PyBaseExceptionObject obj;
@@ -266,6 +268,16 @@ static void haskell_error_dealloc(PyObject *op) {
     Py_TYPE(self)->tp_free(self);
 }
 
+static PyObject* haskell_error_repr(PyObject *op) {
+    HaskellError *self = (HaskellError*) op;
+    PyObject* exc_repr = inline_py_haskell_error_repr(self->exception_stableptr);
+    PyObject* exc_ty   = inline_py_haskell_error_tyrepr(self->exception_stableptr);
+    PyObject* repr     = PyUnicode_FromFormat("<inline_python.HaskellError: %S: %S>", exc_ty, exc_repr);
+    Py_DECREF(exc_repr);
+    Py_DECREF(exc_ty);
+    return repr;
+}
+
 static PyTypeObject HaskellError_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name      = "inline_python.HaskellError",
@@ -273,6 +285,7 @@ static PyTypeObject HaskellError_Type = {
     .tp_flags     = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
     .tp_doc       = PyDoc_STR("Wrapper for a haskell exception object"),
     .tp_dealloc   = haskell_error_dealloc,
+    .tp_repr      = haskell_error_repr
 };
 
 
