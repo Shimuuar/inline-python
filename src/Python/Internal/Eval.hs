@@ -55,7 +55,7 @@ module Python.Internal.Eval
 
 import Control.Concurrent
 import Control.Concurrent.STM
-import Control.Exception         (interruptible,evaluate)
+import Control.Exception         (interruptible,evaluate,allowInterrupt)
 import Control.DeepSeq
 import Control.Monad
 import Control.Monad.Catch
@@ -380,10 +380,13 @@ mainThread lock_init lock_eval = do
     False -> putMVar lock_init Nothing
     True  -> do
       putMVar lock_init . Just =<< getPyThreadID
-      mask_ $ fix $ \loop ->
+      mask_ $ fix $ \loop -> do
+        allowInterrupt
         (takeMVar lock_eval `catch` (\InterruptMain -> pure HereWeGoAgain)) >>= \case
-          EvalReq py resp -> do
-            res <- (Right <$> runPy py) `catch` (pure . Left)
+          EvalReq py resp alive tid_stack -> do
+            putMVar alive True
+            res <- try (withAsyncInitTLS tid_stack $ runPy py)
+              `finally` uninterruptibleMask_ (modifyMVar_ alive (\_ -> pure False))
             putMVar resp res
             loop
           StopReq resp -> do
@@ -494,10 +497,14 @@ foreign import ccall "wrapper" wrapReprFromStablePtr
 -- Running Py monad
 ----------------------------------------------------------------
 
+-- | Request that we send to main thread
 data EvalReq
-  = forall a. EvalReq (Py a) (MVar (Either SomeException a))
+  = forall a. EvalReq (Py a) (MVar (Either SomeException a)) (MVar Bool) (TVar [ThreadId])
+    -- ^ Request to run code in main thread
   | StopReq (MVar ())
+    -- ^ Stop evaluation
   | HereWeGoAgain
+    -- ^ Dummy request. Do nothing
 
 data InterruptMain = InterruptMain
   deriving stock    Show
@@ -553,13 +560,22 @@ runPyInMain py
               takeTMVar main_lock
               acquireLock
               pure ( atomically (releaseLock >> putTMVar main_lock ())
-                   , evalInOtherThread tid_main eval_lock
+                   , evalInOtherThread tid_main tid_main_py eval_lock
                    )
     --
-    evalInOtherThread tid_main eval_lock = do
-      r <- mask_ $ do resp <- newEmptyMVar
-                      putMVar eval_lock $ EvalReq py resp
-                      takeMVar resp `onException` throwTo tid_main InterruptMain
+    evalInOtherThread tid_main tid_main_py eval_lock = do
+      r <- mask_ $ do
+        resp      <- newEmptyMVar
+        alive     <- newEmptyMVar
+        tid_stack <- newTVarIO []
+        putMVar eval_lock $ EvalReq py resp alive tid_stack
+        takeMVar resp `onException` cancelPy PyAsync
+          { asyncTID      = tid_main
+          , asyncTidStack = tid_stack
+          , asyncPyTID    = pure tid_main_py
+          , asyncAlive    = alive
+          , asyncWait     = retry -- Not used by cancelPy
+          }
       either throwM pure r
 
 -- | Execute python action. This function is unsafe and should be only
