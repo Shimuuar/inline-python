@@ -1,3 +1,13 @@
+0.3.0.0 [XXXX.XX.XX]
+--------------------
+* Support for builds with `python3-config`
+* Support for async
+* `inline_python` module is now available.
+* Now haskell exception from haskell callback in converted to
+  `inline_python.HaskellError` and is rethrown if it's not catched by python.
+* Memory leak is fixed. Python exception object were never freed when exception
+  propagated to haskell side.
+
 0.2.1.0 [2026.01.13]
 ----------------
 * `From/ToPy` instance for `Integer`&`Natural` added.
@@ -21,7 +31,7 @@
 0.1.1 [2025.02.13]
 ------------------
 * Number of deadlocks in `runPyInMain` fixed:
-  - It no longer deadlocks is exception is thrown
+  - It no longer deadlocks if exception is thrown
   - Nested calls no longer deadlock.
   - Calling it from python callback.
 * `ToPy` instance added for `Py b`, `a -> Py b`, `a1 -> a2 -> Py b`
