@@ -408,6 +408,7 @@ mainThread lock_init lock_eval = do
           StopReq resp -> do
             [C.block| void {
               PyGILState_Ensure();
+              inline_py_clear_error();
               Py_Finalize();
               } |]
             putMVar resp ()
