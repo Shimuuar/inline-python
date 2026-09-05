@@ -44,19 +44,6 @@ tests = testGroup "Run python"
         $ do liftIO $ putMVar lock ()
              liftIO $ threadDelay 10_000_000
              error "Should be interrupted"
-  , testCase "Exception in runPyInMain works py" $ do
-      lock <- newEmptyMVar
-      tid  <- myThreadId
-      _    <- forkIO $ takeMVar lock >> threadDelay 1000 >> throwTo tid Stop
-      handle (\Stop -> pure ())
-        $ runPyInMain
-        $ do liftIO $ putMVar lock ()
-             [py_|
-               import time
-               while True:
-                   time.sleep(1e-3)
-               |]
-             error "Should be interrupted"
   , testCase "Scope pymain->any" $ runPy $ do
       [pymain|
              x = 12
@@ -225,6 +212,19 @@ tests = testGroup "Run python"
                                                       True  -> error "Timeout"
                                                       False -> retry
         return ()
+    , testCase "Exception in runPyInMain works py" $ do
+        lock <- newEmptyMVar
+        tid  <- myThreadId
+        _    <- forkIO $ takeMVar lock >> threadDelay 1000 >> throwTo tid Stop
+        handle (\Stop -> pure ())
+          $ runPyInMain
+          $ do liftIO $ putMVar lock ()
+               [py_|
+                 import time
+                 while True:
+                     time.sleep(1e-3)
+                 |]
+               error "Should be interrupted"
     ]
   ]
 
