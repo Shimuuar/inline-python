@@ -246,6 +246,9 @@ void inline_py_initialize(void) {
 // ================================================================
 // inline_python module
 
+PyObject* (*inline_py_haskell_error_repr)(void*);
+PyObject* (*inline_py_haskell_error_tyrepr)(void*);
+
 PyObject* inline_py_AsyncCancelled() {
     static PyObject* AsyncCancelled = 0;
     if( AsyncCancelled == 0 ) {
@@ -253,6 +256,80 @@ PyObject* inline_py_AsyncCancelled() {
     }
     return AsyncCancelled;
 }
+
+typedef struct {
+    PyBaseExceptionObject obj;
+    void *exception_stableptr;
+} HaskellError;
+
+static void haskell_error_dealloc(PyObject *op) {
+    HaskellError *self = (HaskellError*) op;
+    hs_free_stable_ptr(self->exception_stableptr);
+    Py_TYPE(self)->tp_free(self);
+}
+
+static PyObject* haskell_error_repr(PyObject *op) {
+    HaskellError *self = (HaskellError*) op;
+    PyObject* exc_repr = inline_py_haskell_error_repr(self->exception_stableptr);
+    PyObject* exc_ty   = inline_py_haskell_error_tyrepr(self->exception_stableptr);
+    PyObject* repr     = PyUnicode_FromFormat("<inline_python.HaskellError: %S: %S>", exc_ty, exc_repr);
+    Py_DECREF(exc_repr);
+    Py_DECREF(exc_ty);
+    return repr;
+}
+
+static PyTypeObject HaskellError_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name      = "inline_python.HaskellError",
+    .tp_basicsize = sizeof(HaskellError),
+    .tp_flags     = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    .tp_doc       = PyDoc_STR("Wrapper for a haskell exception object"),
+    .tp_dealloc   = haskell_error_dealloc,
+    .tp_repr      = haskell_error_repr
+};
+
+
+PyObject* inline_py_HaskellError() {
+    static int initialized = 0;
+    if( 0 == initialized ) {
+        if( PyType_Ready(&HaskellError_Type) != 0) {
+            // It should success always and we don't have any reasonable
+            // way of handing error.
+            exit(1);
+        }
+        initialized = 1;
+    }
+    return (PyObject*)&HaskellError_Type;
+}
+
+PyObject* inline_py_HaskellError_create(void* exc_ptr) {
+    PyTypeObject *base = HaskellError_Type.tp_base;
+    PyObject *args     = PyTuple_New(0);
+    // Call __new__
+    PyObject *obj = base->tp_new(&HaskellError_Type, args, NULL);
+    if( !obj ) {
+        goto err;
+    }
+    // Call __init__
+    if( 0 != base->tp_init(obj, args, NULL) ) {
+        goto err;
+    }
+    // Set custom fields
+    HaskellError* h_err = (HaskellError*)obj;
+    h_err->exception_stableptr = exc_ptr;
+    Py_DECREF(args);
+    return obj;
+err:
+    Py_DECREF(args);
+    return NULL;
+}
+
+void* inline_py_HaskellError_get_stableptr(PyObject* err) {
+    HaskellError *h_err = (HaskellError*) err;
+    return h_err->exception_stableptr;
+}
+
+
 
 static PyMethodDef inline_python_methods[] = {
     {NULL, NULL, 0, NULL}
@@ -267,6 +344,12 @@ static int inline_python_module_exec(PyObject *m) {
     initialized = 1;
     //
     if (PyModule_AddObjectRef(m, "AsyncCancelled", inline_py_AsyncCancelled()) < 0) {
+        return -1;
+    }
+    //
+    HaskellError_Type.tp_base = (PyTypeObject*)PyExc_Exception;
+    HaskellError_Type.tp_new  = NULL;
+    if (PyModule_AddObjectRef(m, "HaskellError", inline_py_HaskellError()) < 0) {
         return -1;
     }
     return 0;

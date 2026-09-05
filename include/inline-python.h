@@ -105,7 +105,25 @@ void* inline_py_get_state(void);
 // inline_python module
 // ================================================================
 
+// Function pointers to be set from haskell side
+
+// String representation of an exception
+extern PyObject* (*inline_py_haskell_error_repr)(void*);
+// String representation of exception type
+extern PyObject* (*inline_py_haskell_error_tyrepr)(void*);
+
+
 PyMODINIT_FUNC PyInit_inline_python(void);
 
-// Obtain class for async exception
+// Obtain type for async exception.
 PyObject* inline_py_AsyncCancelled();
+
+// Obtain type for wrapper for haskell exceptions.
+PyObject* inline_py_HaskellError();
+
+// Create python object wrapping haskell exception
+PyObject* inline_py_HaskellError_create(void* exc_ptr);
+
+// Get StablePtr held by exception. Python object must be of type
+// HaskellError
+void* inline_py_HaskellError_get_stableptr(PyObject* err);

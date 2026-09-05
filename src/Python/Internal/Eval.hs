@@ -55,7 +55,8 @@ module Python.Internal.Eval
 
 import Control.Concurrent
 import Control.Concurrent.STM
-import Control.Exception         (interruptible)
+import Control.Exception         (interruptible,evaluate)
+import Control.DeepSeq
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
@@ -63,12 +64,12 @@ import Control.Monad.Trans.Cont
 import Data.Maybe
 import Data.Function
 import Data.ByteString.Unsafe    qualified as BS
+import Data.Typeable
 import Foreign.Concurrent        qualified as GHC
 import Foreign.Ptr
 import Foreign.ForeignPtr
 import Foreign.StablePtr
 import Foreign.C.Types
-import Foreign.C.String
 import Foreign.Marshal.Array
 import Foreign.Storable
 import System.Environment
@@ -400,13 +401,16 @@ doInitializePythonIO = do
   argv0 <- getProgName
   argv  <- getArgs
   let n_argv = fromIntegral $ length argv + 1
-  -- FIXME: For some reason sys.argv is initialized incorrectly. No
-  --        easy way to debug. Will do for now
+  hask_err_repr   <- wrapReprFromStablePtr haskellErrorRepr
+  hask_err_tyrepr <- wrapReprFromStablePtr haskellErrorTyRepr
   r <- evalContT $ do
     p_argv0  <- ContT $ withWCString argv0
     p_argv   <- traverse (ContT . withWCString) argv
     ptr_argv <- ContT $ withArray (p_argv0 : p_argv)
     liftIO [C.block| int {
+      // Set global constants
+      inline_py_haskell_error_repr   = $(PyObject* (*hask_err_repr)(void*));
+      inline_py_haskell_error_tyrepr = $(PyObject* (*hask_err_tyrepr)(void*));
       // Now fill config
       PyStatus status;
       PyConfig cfg;
@@ -445,8 +449,12 @@ doInitializePythonIO = do
               PyErr_Clear();
           }
       }
-      // Initialize internals
+      // Initialize internals. We also need to import module with our internals
       inline_py_initialize();
+      PyObject *inline_python = PyImport_ImportModule("inline_python");
+      if( PyErr_Occurred() ) {
+          PyErr_Clear();
+      }
       // Release GIL so other threads may take it
       PyEval_SaveThread();
       return 0;
@@ -456,6 +464,30 @@ doInitializePythonIO = do
       return 1;
       } |]
   return $! r == 0
+
+haskellErrorRepr :: Ptr () -> IO (Ptr PyObject)
+haskellErrorRepr ptr = unsafeRunPy $ runProgram $ do
+  SomeException err <- progIO $ deRefStablePtr $ castPtrToStablePtr ptr
+  -- We need to make sure that we evaluated string so that we won't
+  -- leak exceptions
+  repr  <- progIO $ evaluate $ force $ show err
+  p_str <- withPyWCString repr
+  progIO [CU.exp| PyObject* { PyUnicode_FromWideChar($(wchar_t *p_str), -1) } |]
+
+haskellErrorTyRepr :: Ptr () -> IO (Ptr PyObject)
+haskellErrorTyRepr ptr = unsafeRunPy $ runProgram $ do
+  SomeException err <- progIO $ deRefStablePtr $ castPtrToStablePtr ptr
+  -- We need to make sure that we evaluated string so that we won't
+  -- leak exceptions
+  repr  <- progIO $ evaluate $ force $ show $ typeOf err
+  p_str <- withPyWCString repr
+  progIO [CU.exp| PyObject* { PyUnicode_FromWideChar($(wchar_t *p_str), -1) } |]
+
+type FunWrapper a = a -> IO (FunPtr a)
+
+foreign import ccall "wrapper" wrapReprFromStablePtr
+  :: FunWrapper (Ptr () -> IO (Ptr PyObject))
+
 
 
 ----------------------------------------------------------------
@@ -769,46 +801,50 @@ getPyThreadID = PyThreadId <$> [CU.exp| uint64_t { PyThread_get_thread_ident() }
 --   NULL.
 convertHaskell2Py :: SomeException -> Py (Ptr PyObject)
 convertHaskell2Py err = Py $ do
-  withCString ("Haskell exception: "++show err) $ \p_err -> do
-    [C.block| PyObject* {
-      PyErr_SetString(PyExc_RuntimeError, $(char *p_err));
-      return NULL;
-      } |]
+  s_ptr <- newStablePtr err
+  let ptr = castStablePtrToPtr s_ptr
+  [C.block| PyObject* {
+    PyObject* exc = inline_py_HaskellError_create($(void* ptr));
+    PyErr_SetObject(inline_py_HaskellError(), exc);
+    Py_DECREF(exc);
+    return NULL;
+    } |]
 
 -- | Convert python exception to haskell exception. Should only be
 --   called if there's unhandled python exception. Clears exception.
-convertPy2Haskell :: Py PyException
+convertPy2Haskell :: Py SomeException
 convertPy2Haskell = runProgram $ do
   p_errors <- withPyAllocaArray @(Ptr PyObject) 3
-  -- Fetch error indicator
-  (p_type, p_value) <- progIO $ do
-    [CU.block| void {
-       PyObject **p = $(PyObject** p_errors);
-       PyErr_Fetch(p, p+1, p+2);
-       }|]
-    p_type  <- peekElemOff p_errors 0
-    -- NOTE: When we set exception using PyThreadState_SetAsyncExc
-    --       this field remains NULL on python<=3.11. In this case we
-    --       assume it's our AsyncCancelled:
-    p_value <- peekElemOff p_errors 1 >>= \case
-      NULL -> [CU.block| PyObject* {
-        PyObject *err_class = inline_py_AsyncCancelled();
-        PyObject *tuple     = PyTuple_New(0);
-        PyObject *err       = PyObject_Call(err_class, tuple, NULL);
-        Py_DECREF(tuple);
-        return err;
-        } |]
-      p    -> pure p
-    -- Traceback is not used ATM
-    pure (p_type,p_value)
-  -- Convert exception type and value to strings.
+  -- Fetch error information
+  progIO [CU.block| void {
+    PyObject **p = $(PyObject** p_errors);
+    PyErr_Fetch(p, p+1, p+2);
+    }|]
+  -- Fetch exception type.
+  --
+  -- NOTE: When we set exception using PyThreadState_SetAsyncExc this
+  --       field remains NULL on python<=3.11. Thus we must use xdecref
+  p_type  <- progPyBracket $ (Py $ peekElemOff p_errors 0) `bracket` decref
+  p_value <- progPyBracket $ (Py $ peekElemOff p_errors 1) `bracket` xdecref
+  _trace  <- progPyBracket $ (Py $ peekElemOff p_errors 2) `bracket` xdecref
+  -- Should we convert to PyAsyncCancelled?
+  ty_async_cancelled <- progIO [CU.exp| PyObject* { inline_py_AsyncCancelled() } |]
+  when (p_type == ty_async_cancelled) $ do
+    abort $ SomeException PyAsyncCancelled
+  -- Should we convert to haskell exception?
+  ty_hask_err <- progIO [CU.exp| PyObject* { inline_py_HaskellError() } |]
+  when (p_type == ty_hask_err) $ do
+    s_ptr <- progIO [CU.exp| void* { inline_py_HaskellError_get_stableptr($(PyObject* p_value)) } |]
+    err   <- progIO $ deRefStablePtr $ castPtrToStablePtr s_ptr
+    abort err
+  -- Convert any other python exception
   progPy $ do
     s_type  <- pyobjectStrAsHask p_type
     s_value <- pyobjectStrAsHask p_value
     incref p_value
     exc     <- newPyObject p_value
     let bad_str = "__str__ call failed"
-    pure $ PyException
+    pure $ SomeException $ PyError $ PyException
       { ty        = fromMaybe bad_str s_type
       , str       = fromMaybe bad_str s_value
       , exception = exc
@@ -819,7 +855,7 @@ checkThrowPyError :: Py ()
 checkThrowPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> pure ()
-    _    -> throwM . PyError =<< convertPy2Haskell
+    _    -> throwM =<< convertPy2Haskell
 
 -- | Throw python error as haskell exception if it's raised. If it's
 --   not that internal error. Another exception will be raised
@@ -827,7 +863,7 @@ mustThrowPyError :: Py a
 mustThrowPyError =
   Py [CU.exp| PyObject* { PyErr_Occurred() } |] >>= \case
     NULL -> error $ "mustThrowPyError: no python exception raised."
-    _    -> throwM . PyError =<< convertPy2Haskell
+    _    -> throwM =<< convertPy2Haskell
 
 -- | Calls mustThrowPyError if pointer is null or returns it unchanged
 throwOnNULL :: Ptr PyObject -> Py (Ptr PyObject)
