@@ -35,17 +35,28 @@ tests = testGroup "Run python"
       throwsPyIO $ runPyInMain [py_| 1 / 0 |]
       runPyInMain [py_| assert True |]
     -- Here we test that exceptions are really passed to python's thread without running python
-  , testCase "Exception in runPyInMain works" $ do
+  , testCase "Exception in runPyInMain works hask" $ do
       lock <- newEmptyMVar
       tid  <- myThreadId
-      _    <- forkIO $ takeMVar lock >> throwTo tid Stop
+      _    <- forkIO $ takeMVar lock >> threadDelay 1000 >> throwTo tid Stop
       handle (\Stop -> pure ())
         $ runPyInMain
         $ do liftIO $ putMVar lock ()
              liftIO $ threadDelay 10_000_000
              error "Should be interrupted"
-      runPyInMain $ pure ()
-  --
+  , testCase "Exception in runPyInMain works py" $ do
+      lock <- newEmptyMVar
+      tid  <- myThreadId
+      _    <- forkIO $ takeMVar lock >> threadDelay 1000 >> throwTo tid Stop
+      handle (\Stop -> pure ())
+        $ runPyInMain
+        $ do liftIO $ putMVar lock ()
+             [py_|
+               import time
+               while True:
+                   time.sleep(1e-3)
+               |]
+             error "Should be interrupted"
   , testCase "Scope pymain->any" $ runPy $ do
       [pymain|
              x = 12

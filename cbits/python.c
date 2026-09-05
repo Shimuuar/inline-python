@@ -243,8 +243,24 @@ void inline_py_initialize(void) {
     }
 }
 
+void inline_py_clear_error(void) {
+    static PyObject* globals = NULL;
+    static PyObject* locals  = NULL;
+    static PyObject* code    = NULL;
+    if( NULL == code ) {
+        globals = PyDict_New();
+        locals  = PyDict_New();
+        code    = Py_CompileString("None", "<interactive>", Py_eval_input);
+    }
+    PyObject* r = PyEval_EvalCode(code, globals, locals);
+    // None is immortal. No need to decrement counter
+    PyErr_Clear();
+}
+
+
 // ================================================================
 // inline_python module
+// ================================================================
 
 PyObject* (*inline_py_haskell_error_repr)(void*);
 PyObject* (*inline_py_haskell_error_tyrepr)(void*);

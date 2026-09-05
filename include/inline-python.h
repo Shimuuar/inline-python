@@ -90,6 +90,12 @@ void inline_py_Integer_FromPy(
 // runPyAsync & Async exceptions
 // ================================================================
 
+// Force clear error possibly raised by PyThreadState_SetAsyncExc
+//
+// Ordinary PyErr_Clear doesn't work. One needed python interpreter to
+// perform somce work in order to see raised exception.
+void inline_py_clear_error(void);
+
 // Initialize thread local storage as used by runPyAsync
 void inline_py_init_state(void *stack);
 
