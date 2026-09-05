@@ -128,9 +128,19 @@ C.include "<inline-python.h>"
 --
 -- Also python designate thread in which python interpreter was
 -- initialized as a main thread. It has special status for example
--- some libraries may run only in main thread (e.g. tkinter). But if
--- we don't take special precautions we won't know which thread it
--- is.
+-- some libraries may run only in main thread (e.g. tkinter). In
+-- single threaded runtime everything is simple: we one only one
+-- thread anyway.
+--
+-- In multithreaded one we start dedicated thread using forkOS and use
+-- standard tools for interacting with it. This requires asynchrony
+-- and all complications that come with it.
+--
+-- Execution is protected by haskell mutex. Only one thread can
+-- evaluate code at time. This is critical for preserving correctness
+-- for cancelling main thread. While we hold lock no one else can
+-- perform operations with main thread.
+
 
 
 
@@ -380,15 +390,25 @@ mainThread lock_init lock_eval = do
     False -> putMVar lock_init Nothing
     True  -> do
       putMVar lock_init . Just =<< getPyThreadID
-      mask_ $ fix $ \loop ->
-        (takeMVar lock_eval `catch` (\InterruptMain -> pure HereWeGoAgain)) >>= \case
-          EvalReq py resp -> do
-            res <- (Right <$> runPy py) `catch` (pure . Left)
+      mask_ $ fix $ \loop -> do
+        -- Here we discard any late PyAsyncCancelled exceptions
+        (takeMVar lock_eval `catch` (\PyAsyncCancelled -> pure HereWeGoAgain)) >>= \case
+          EvalReq py resp alive tid_stack -> do
+            let action = withAsyncInitTLS tid_stack $ unsafeRunPy $ ensureGIL $ do
+                  -- We must clear any error python indication. It
+                  -- could be leftover from interrupting previous
+                  -- evaluation
+                  Py $ [CU.exp| void { inline_py_clear_error() } |]
+                  Py $ putMVar alive True
+                  py
+            res <- try action
+              `finally` uninterruptibleMask_ (modifyMVar_ alive (\_ -> pure False))
             putMVar resp res
             loop
           StopReq resp -> do
             [C.block| void {
               PyGILState_Ensure();
+              inline_py_clear_error();
               Py_Finalize();
               } |]
             putMVar resp ()
@@ -494,14 +514,15 @@ foreign import ccall "wrapper" wrapReprFromStablePtr
 -- Running Py monad
 ----------------------------------------------------------------
 
+-- | Request that we send to main thread
 data EvalReq
-  = forall a. EvalReq (Py a) (MVar (Either SomeException a))
+  = forall a. EvalReq (Py a) (MVar (Either SomeException a)) (MVar Bool) (TVar [ThreadId])
+    -- ^ Request to run code in main thread
   | StopReq (MVar ())
+    -- ^ Stop evaluation
   | HereWeGoAgain
+    -- ^ Dummy request. Do nothing
 
-data InterruptMain = InterruptMain
-  deriving stock    Show
-  deriving anyclass Exception
 
 -- | Execute python action. It will take and hold global lock while
 --   code is executed. Python exceptions raised during execution are
@@ -516,12 +537,13 @@ runPy py
     -- it wasn't. Better than segfault isn't it?
     go = ensurePyLock $ mask_ $ unsafeRunPy (ensureGIL py)
 
+
 -- | Same as 'runPy' but will make sure that code is run in python's
 --   main thread. It's thread in which python's interpreter was
 --   initialized. Some python's libraries may need that. It has higher
 --   call overhead compared to 'runPy'.
 runPyInMain :: Py a -> IO a
--- See NOTE: [Python and threading]
+-- See NOTE: [Python and threading, Main thread]
 runPyInMain py
   -- Multithreaded RTS
   | rtsSupportsBoundThreads = do
@@ -553,13 +575,22 @@ runPyInMain py
               takeTMVar main_lock
               acquireLock
               pure ( atomically (releaseLock >> putTMVar main_lock ())
-                   , evalInOtherThread tid_main eval_lock
+                   , evalInOtherThread tid_main tid_main_py eval_lock
                    )
     --
-    evalInOtherThread tid_main eval_lock = do
-      r <- mask_ $ do resp <- newEmptyMVar
-                      putMVar eval_lock $ EvalReq py resp
-                      takeMVar resp `onException` throwTo tid_main InterruptMain
+    evalInOtherThread tid_main tid_main_py eval_lock = do
+      r <- mask_ $ do
+        resp      <- newEmptyMVar
+        alive     <- newEmptyMVar
+        tid_stack <- newTVarIO []
+        putMVar eval_lock $ EvalReq py resp alive tid_stack
+        takeMVar resp `onException` cancelPy PyAsync
+          { asyncTID      = tid_main
+          , asyncTidStack = tid_stack
+          , asyncPyTID    = pure tid_main_py
+          , asyncAlive    = alive
+          , asyncWait     = retry -- Not used by cancelPy
+          }
       either throwM pure r
 
 -- | Execute python action. This function is unsafe and should be only
@@ -628,17 +659,22 @@ runPyAsync py = do
   result    <- newEmptyTMVarIO
   tid_stack <- newTVarIO []
   py_tid_mv <- newEmptyMVar
-  alive     <- newMVar True
+  alive     <- newEmptyMVar
   -- Worker thread. We must modify liveliness MVar under
   -- uninterruptibleMask otherwise it could be interrupted and
   -- cancelPy will consider thread alive forever
+  --
+  -- We also clear dangling async python exception in case we have
+  -- leftover from previous evaluation
   tid    <- forkOS $ mask_ $
     (do putMVar py_tid_mv =<< getPyThreadID
         a <- try
            $ withAsyncInitTLS tid_stack
            $ ensurePyLock
            $ unsafeRunPy
-           $ ensureGIL py
+           $ ensureGIL $ do Py [CU.exp| void { inline_py_clear_error() } |]
+                            Py $ putMVar alive True
+                            py
         atomically $ putTMVar result a
     ) `finally` uninterruptibleMask_ (modifyMVar_ alive (\_ -> pure False))
   pure PyAsync
