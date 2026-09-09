@@ -524,9 +524,15 @@ data EvalReq
     -- ^ Dummy request. Do nothing
 
 
--- | Execute python action. It will take and hold global lock while
---   code is executed. Python exceptions raised during execution are
---   converted to haskell exception 'PyError'.
+-- | Execute python action. This is simplest executor with lowest
+--   overhead but it comes with several caveats. When thread executes
+--   python code it could not be interrupted since it's in foreign
+--   call. Use 'runPyAsync' if you need ability to interrupt. Also
+--   python uses GIL so only one thread can evaluate python code at
+--   time.
+--
+--   Python exceptions raised during execution are converted to
+--   haskell exception 'PyError'.
 runPy :: Py a -> IO a
 -- See NOTE: [Python and threading]
 runPy py
@@ -538,10 +544,15 @@ runPy py
     go = ensurePyLock $ mask_ $ unsafeRunPy (ensureGIL py)
 
 
--- | Same as 'runPy' but will make sure that code is run in python's
---   main thread. It's thread in which python's interpreter was
---   initialized. Some python's libraries may need that. It has higher
---   call overhead compared to 'runPy'.
+-- | This function executes python code on python's main thread. It's
+--   OS thread in which interpreter was initialized and it has some
+--   special status in python. Some libraries could only work when
+--   called from main thread. It has higher call overhead compared to
+--   'runPy' and only one haskell thread could be executing something
+--   on main thread at time.
+--
+--   When executing on threaded runtime this function could be
+--   interrupted by asynchronous exceptions.
 runPyInMain :: Py a -> IO a
 -- See NOTE: [Python and threading, Main thread]
 runPyInMain py
@@ -625,7 +636,12 @@ unsafeRunPy (Py io) = io
 --    thread is dead already.
 
 
--- | Exception thrown to a thread doing async python computation.
+-- | Exception thrown to a thread doing async python computation. On
+--   python side it corresponds to
+--   @inline_python.AsyncCancelled@. Latter is automatically converted
+--   to @PyAsyncCancelled@.
+--
+-- @since 0.3
 data PyAsyncCancelled = PyAsyncCancelled
   deriving (Show, Eq)
 
@@ -633,7 +649,9 @@ instance Exception PyAsyncCancelled
 
 -- | Handle to asynchronous python computation spawned by
 --   'runPyAsync'. It's performed on separate OS thread. Use
---   'wait'\/'waitCatch' to obtain computation result.
+--   'waitPy'\/'waitPyCatch' to obtain computation result.
+--
+-- @since 0.3
 data PyAsync a = PyAsync
   { asyncTID      :: !ThreadId          -- Thread ID
   , asyncTidStack :: !(TVar [ThreadId]) -- Stack of callback thread ID
@@ -644,15 +662,21 @@ data PyAsync a = PyAsync
 
 -- | Wait for result of asynchronous computation. If it threw an
 --   exception it will be rethrown by @wait@.
+--
+-- @since 0.3
 waitPy :: PyAsync a -> STM a
 waitPy a = either throwSTM pure =<< a.asyncWait
 
 -- | Wait for result of asynchronous computation. Exception thrown by
 --   it will be returned as @Left@.
+--
+-- @since 0.3
 waitPyCatch :: PyAsync a -> STM (Either SomeException a)
 waitPyCatch = (.asyncWait)
 
--- | Create new OS thread and execute python code on it.
+-- | Execute python computation on dedicated OS thread.
+--
+-- @since 0.3
 runPyAsync :: Py a -> IO (PyAsync a)
 runPyAsync py = do
   ensureInit
@@ -700,15 +724,16 @@ withAsyncInitTLS stack = bracket ini fini . const
 
 
 
--- | Cancel execution of asynchronous computation. Most likely thread
---   will be executing some python so first it attempts to raise async
---   exception in python code. Then it throws 'PyAsyncCancelled' in case
---   it executes haskell code. This means thread could be terminate
---   either with 'PyError' or 'PyAsyncCancelled'.
+-- | Cancel execution of asynchronous computation. It throws
+--   'PyAsyncCancelled' to haskell threads including any haskell
+--   callbacks from python. Python will interrupted by asynchronously
+--   raising @inline_python.AsyncCancelled@.
 --
 --   Note that python code generally is not written under assumption
 --   that it could be smitten with exception at an absolutely any
---   moment.
+--   moment. It could cause problems.
+--
+-- @since 0.3
 cancelPy :: PyAsync a -> IO ()
 cancelPy PyAsync{asyncTID=tid, asyncTidStack, asyncPyTID, asyncAlive} = do
   -- See NOTE: [Py Async], [Interrupting python]
@@ -744,11 +769,15 @@ cancelPy PyAsync{asyncTID=tid, asyncTidStack, asyncPyTID, asyncAlive} = do
   killThread tid_kill_cb
 
 -- | Variant of 'cancel' which isn't interruptible.
+--
+-- @since 0.3
 uninterruptibleCancelPy :: PyAsync a -> IO ()
 uninterruptibleCancelPy = uninterruptibleMask_ . cancelPy
 
 -- | Create new OS thread and execute python code on it. Will use
 --   'uninterruptibleCancel' after callback finishes execution.
+--
+-- @since 0.3
 withPyAsync :: Py a -> (PyAsync a -> IO b) -> IO b
 withPyAsync py = bracket (runPyAsync py) uninterruptibleCancelPy
 

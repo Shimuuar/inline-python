@@ -1,13 +1,13 @@
 -- |
--- Asynchronous computation using python. Normally library tries to
--- execute python code in the same thread. Moreover it use global lock
--- in addition to GIL in order to avoid blocking capability on GIL.
--- This module provide API for working with concurrent python.
--- Its API is heavily modelled after @async@ package.
+-- Asynchronous computation using python. Its API is modelled after
+-- @async@ package. It evaluates python on separate OS thread so it's
+-- more heavyweight than 'Python.Inline.runPy'. But it's possible to
+-- properly interrupt running computation with 'cancelPy' or to use
+-- 'withPyAsync' to ensure that async computation properly terminated.
 --
--- Note it's very experimental and not well tested. Also mixing
--- concurrency primitives from two languages makes difficult task of
--- concurrent programming even more complicated.
+-- Since arbitrary IO is available either in @Py@ via @liftIO@ or in
+-- haskell callbacks from python code. It's possible to use haskell
+-- concurrency primitives to communicate with python thread.
 module Python.Inline.Async
   ( PyAsync
   , PyAsyncCancelled(..)
@@ -20,4 +20,3 @@ module Python.Inline.Async
   ) where
 
 import Python.Internal.Eval
-
