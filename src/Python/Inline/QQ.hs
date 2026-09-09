@@ -30,8 +30,13 @@
 -- >         do_that()
 -- >         |]
 --
--- If control over python's global and local variables is
--- required. APIs from "Python.Inline.Eval" should be used instead.
+--
+-- == Variable scope
+--
+-- Python has two copes: global and local variables. Both are simply
+-- @dict[str,Any]@. Quasiquoters use different dictionaries for
+-- globals and locals. If tighter control over variables scope is
+-- required APIs from "Python.Inline.Eval" should be used instead.
 module Python.Inline.QQ
   ( pymain
   , py_
@@ -46,9 +51,10 @@ import Python.Internal.EvalQQ
 import Python.Internal.Eval
 
 
--- | Evaluate sequence of python statements. It works in the same way
---   as python's @exec@. All module imports and all variables defined
---   in this quasiquote will be visible to later quotes.
+-- | Evaluate sequence of python statements. It uses python's @exec@.
+--   Both global and local state for this quasiquoter are variables of
+--   @\__main__@ module. Any variables including imported modules will
+--   remain visible to later quasiquotes.
 --
 --   It creates value of type @Py ()@
 pymain :: QuasiQuoter
@@ -59,9 +65,11 @@ pymain = QuasiQuoter
   , quoteDec  = error "quoteDec"
   }
 
--- | Evaluate sequence of python statements. All module imports and
---   all variables defined in this quasiquote will be discarded and
---   won't be visible in later quotes.
+-- | Evaluate sequence of python statements. Global variables for this
+--   quasiquoter are one defined in @\__main__@ module and locals use
+--   newly allocated dictionary. It will be discarded after execution
+--   so variables defined in this quasiquote are visible only inside
+--   of it.
 --
 --   It creates value of type @Py ()@
 py_ :: QuasiQuoter
@@ -73,7 +81,8 @@ py_ = QuasiQuoter
   }
 
 -- | Evaluate single python expression. It only accepts single
---   expressions same as python's @eval@.
+--   expressions same as python's @eval@. Its globals are variables in
+--   @\__main__@ module and locals are new dictionary same as in @py_@.
 --
 --   This quote creates object of type @Py PyObject@
 pye :: QuasiQuoter
@@ -85,9 +94,12 @@ pye = QuasiQuoter
   }
 
 -- | Another quasiquoter which works around that sequence of python
---   statements doesn't have any value associated with it.  Content of
+--   statements doesn't have any value associated with it. Content of
 --   quasiquote is function body. So to get value out of it one must
---   call return
+--   call return. Its globals are variables in @\__main__@ module and
+--   locals are new dictionary same as in @py_@.
+--
+--   This quote creates object of type @Py PyObject@
 pyf :: QuasiQuoter
 pyf = QuasiQuoter
   { quoteExp  = \txt -> [| evaluatorPyf $(expQQ Fun txt) |]
