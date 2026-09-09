@@ -1,12 +1,18 @@
 0.3.0.0 [XXXX.XX.XX]
 --------------------
-* Support for builds with `python3-config`
-* Support for async
-* `inline_python` module is now available.
-* Now haskell exception from haskell callback in converted to
-  `inline_python.HaskellError` and is rethrown if it's not catched by python.
-* Memory leak is fixed. Python exception object were never freed when exception
-  propagated to haskell side.
+* Support for asynchronous execution added in module `Python.Inline.Async`.
+  It adds API copied from `async` and interruptible python computations.
+* `runPyInMain` could be reliably interrupted by asynchronous exceptions.
+* Package now uses `Custom` build type. It now supports configuring python using
+  `python3-config` instead of `pkg-config` when `-fpython3-config` manual cabal
+  flag is set. Default behavior is unchanged.
+* Python module `inline_python` is now available. It contains exception types
+  used by library: `AsyncCancelled` and `HaskellError` which wraps haskell
+  exception from callback.
+* Haskell exception raised in haskell callback will be rethrown if not caught by
+  python instead of being converted to `PyError`.
+* Memory leak in exception handling is fixed. Python exception object were never
+  freed when exception propagated to haskell side.
 
 0.2.1.0 [2026.01.13]
 ----------------
