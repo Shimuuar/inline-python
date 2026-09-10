@@ -95,6 +95,7 @@ Library
     Python.Inline.Eval
     Python.Inline.Literal
     Python.Inline.Monad
+    Python.Inline.Monad.QQ
     Python.Inline.QQ
     Python.Inline.Types
   Other-modules:
