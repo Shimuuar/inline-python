@@ -49,6 +49,7 @@ module Python.Internal.Eval
   , unsafeWithCode
   , eval
   , exec
+  , evalPyFunction
     -- * Debugging
   , debugPrintPy
   ) where
@@ -1095,6 +1096,35 @@ exec globals locals q = runProgram $ do
     checkThrowPyError
 {-# SPECIALIZE exec :: Main -> Main -> PyQuote -> Py () #-}
 {-# SPECIALIZE exec :: Main -> Temp -> PyQuote -> Py () #-}
+
+-- | Evaluate code as if it's a function body and bound arguments are
+--   parameters to that function. Just like function it could return
+--   value and always creates new scope.
+--
+-- @since 0.3
+evalPyFunction
+  :: Namespace global
+  => global  -- ^ Global variables
+  -> PyQuote -- ^ Source code
+  -> Py PyObject
+evalPyFunction globals (PyQuote code binder) = runProgram $ do
+  p_locals <- takeOwnership =<< progPy basicNewDict
+  p_kwargs <- takeOwnership =<< progPy basicNewDict
+  progPy $ do
+    -- Create function in p_locals
+    exec globals (DictPtr p_locals) (PyQuote code mempty)
+    -- Look up function
+    p_fun <- getFunctionObject p_locals >>= \case
+      NULL -> throwM $ PyInternalError "_inline_python_ must be present"
+      p    -> pure p
+    -- Call python function we just constructed
+    binder.bind p_kwargs
+    newPyObject =<< throwOnNULL =<< basicCallKwdOnly p_fun p_kwargs
+
+getFunctionObject :: Ptr PyObject -> Py (Ptr PyObject)
+getFunctionObject p_dict = do
+  Py [CU.exp| PyObject* { PyDict_GetItemString($(PyObject *p_dict), "_inline_python_") } |]
+
 
 -- | Obtain pointer to code
 unsafeWithCode :: Code -> Program r (Ptr CChar)

@@ -102,7 +102,7 @@ pye = QuasiQuoter
 --   This quote creates object of type @Py PyObject@
 pyf :: QuasiQuoter
 pyf = QuasiQuoter
-  { quoteExp  = \txt -> [| evaluatorPyf $(expQQ Fun txt) |]
+  { quoteExp  = \txt -> [| evalPyFunction Main $(expQQ Fun txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
