@@ -7,6 +7,7 @@ module Python.Inline.Eval
   ( -- * Python execution
     eval
   , exec
+  , evalPyFunction
     -- * Source code
   , PyQuote(..)
   , Code

@@ -1,14 +1,20 @@
 0.3.0.0 [XXXX.XX.XX]
 --------------------
-* Support for asynchronous execution added in module `Python.Inline.Async`.
-  It adds API copied from `async` and interruptible python computations.
-* `runPyInMain` could be reliably interrupted by asynchronous exceptions.
-* Package now uses `Custom` build type. It now supports configuring python using
-  `python3-config` instead of `pkg-config` when `-fpython3-config` manual cabal
-  flag is set. Default behavior is unchanged.
+* Support for asynchronous execution added in module `Python.Inline.Async`.  It
+  uses API modelled after `async` package. Such computations could be
+  interrupted using `cancelPy` even when they're running python code or haskell
+  callback/
+* When threaded runtime is used `runPyInMain` could be reliably interrupted by
+  asynchronous exceptions.
 * Python module `inline_python` is now available. It contains exception types
   used by library: `AsyncCancelled` and `HaskellError` which wraps haskell
   exception from callback.
+* `Python.Inline.Monad` and `Python.Inline.Monad.QQ` modules providing monadic
+  API. It uses `MonadPy` type class which allows user code to carry around
+  python dictionaries with global and local scopes.
+* Package now uses `Custom` build type. It now supports configuring python using
+  `python3-config` instead of `pkg-config` when `-fpython3-config` manual cabal
+  flag is set. Default behavior is unchanged.
 * Haskell exception raised in haskell callback will be rethrown if not caught by
   python instead of being converted to `PyError`.
 * Memory leak in exception handling is fixed. Python exception object were never

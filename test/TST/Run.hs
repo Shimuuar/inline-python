@@ -207,7 +207,7 @@ tests = testGroup "Run python"
           forever [py_| loop_hs() |]
         d <- registerDelay 100_000
         threadDelay 100
-        forkIO $ cancelPy a
+        _ <- forkIO $ cancelPy a
         _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
                                                       True  -> error "Timeout"
                                                       False -> retry
@@ -225,6 +225,17 @@ tests = testGroup "Run python"
                      time.sleep(1e-3)
                  |]
                error "Should be interrupted"
+    ]
+    -- Here we only test that quasiquotes produce correct code
+  , testGroup "Monadic"
+    [ testCase "pymain" $ runPy [pymain| assert True |]
+    , testCase "py_"    $ runPy [py_|    assert True |]
+    , testCase "pye" $ runPy $ do
+        n <- fromPy =<< [pye| 42 |]
+        liftIO $ Just (42::Int) @=? n
+    , testCase "pyf" $ runPy $ do
+        n <- fromPy =<< [pyf| return 42 |]
+        liftIO $ Just (42::Int) @=? n
     ]
   ]
 

@@ -2,10 +2,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 -- |
 module Python.Internal.EvalQQ
-  ( -- * Evaluators and QQ
-    evaluatorPyf
-    -- * Code generation
-  , expQQ
+  ( -- * Code generation
+    expQQ
   , Mode(..)
   ) where
 
@@ -65,31 +63,6 @@ bindVar var a = DictBinder $ \p_dict -> runProgram $ do
     case r of
       0 -> pure ()
       _ -> mustThrowPyError
-
-
-
-----------------------------------------------------------------
--- Evaluators
-----------------------------------------------------------------
-
-evaluatorPyf :: PyQuote -> Py PyObject
-evaluatorPyf (PyQuote code binder) = runProgram $ do
-  p_locals <- takeOwnership =<< progPy basicNewDict
-  p_kwargs <- takeOwnership =<< progPy basicNewDict
-  progPy $ do
-    -- Create function in p_locals
-    exec Main (DictPtr p_locals) (PyQuote code mempty)
-    -- Look up function
-    p_fun <- getFunctionObject p_locals >>= \case
-      NULL -> throwM $ PyInternalError "_inline_python_ must be present"
-      p    -> pure p
-    -- Call python function we just constructed
-    binder.bind p_kwargs
-    newPyObject =<< throwOnNULL =<< basicCallKwdOnly p_fun p_kwargs
-
-getFunctionObject :: Ptr PyObject -> Py (Ptr PyObject)
-getFunctionObject p_dict = do
-  Py [CU.exp| PyObject* { PyDict_GetItemString($(PyObject *p_dict), "_inline_python_") } |]
 
 
 

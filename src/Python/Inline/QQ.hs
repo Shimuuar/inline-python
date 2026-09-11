@@ -52,7 +52,7 @@ import Python.Internal.Eval
 
 
 -- | Evaluate sequence of python statements. It uses python's @exec@.
---   Both global and local state for this quasiquoter are variables of
+--   Both global and local scope for this quasiquoter are variables of
 --   @\__main__@ module. Any variables including imported modules will
 --   remain visible to later quasiquotes.
 --
@@ -102,7 +102,7 @@ pye = QuasiQuoter
 --   This quote creates object of type @Py PyObject@
 pyf :: QuasiQuoter
 pyf = QuasiQuoter
-  { quoteExp  = \txt -> [| evaluatorPyf $(expQQ Fun txt) |]
+  { quoteExp  = \txt -> [| evalPyFunction Main $(expQQ Fun txt) |]
   , quotePat  = error "quotePat"
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
