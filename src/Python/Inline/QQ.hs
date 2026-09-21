@@ -109,9 +109,10 @@ pyf = QuasiQuoter
   }
 
 -- | Create quote of python code suitable for use with
---   'Python.Inline.Eval.exec'
+--   'Python.Inline.Eval.exec', 'Python.Inline.Eval.eval',
+--   'Python.Inline.Eval.evalPyFunction'.
 --
---   It creates value of type @PyQuote@
+--   It creates value of type 'Python.Inline.Eval.PyQuote'.
 --
 --   @since 0.2@
 pycode :: QuasiQuoter
