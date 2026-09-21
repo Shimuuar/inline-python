@@ -58,4 +58,3 @@ bindVar name a = DictBinder $ \p_dict -> runProgram $ do
     case r of
       0 -> pure ()
       _ -> mustThrowPyError
-

@@ -4,12 +4,15 @@
 -- "Python.Inline.QQ" but they produce splices which are polymorphic
 -- in 'MonadPy'. For 'Py' in particular they behave identically. 
 module Python.Inline.Monad.QQ
-  ( pymain
+  ( -- * Evalution in @Py@ monad
+    pymain
   , py_
   , pye
   , pyf
+    -- * Creation of @PyQuote@
   , pycode
   , pyfun
+  , pySource
   ) where
 
 
@@ -18,7 +21,7 @@ import Language.Haskell.TH.Quote
 import Python.Internal.EvalQQ
 import Python.Internal.Eval
 import Python.Inline.Monad
-import Python.Inline.QQ (pycode,pyfun)
+import Python.Inline.QQ (pycode, pyfun, pySource)
 
 
 

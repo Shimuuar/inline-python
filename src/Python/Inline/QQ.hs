@@ -38,18 +38,24 @@
 -- globals and locals. If tighter control over variables scope is
 -- required APIs from "Python.Inline.Eval" should be used instead.
 module Python.Inline.QQ
-  ( pymain
+  ( -- * Evalution in @Py@ monad
+    pymain
   , py_
   , pye
   , pyf
+    -- * Creation of @PyQuote@
+    -- $PyQuote
   , pycode
   , pyfun
+  , pySource
   ) where
 
 import Language.Haskell.TH.Quote
+import Language.Haskell.TH.Syntax qualified as TH
 
 import Python.Internal.EvalQQ
 import Python.Internal.Eval
+import Python.Internal.Types
 
 
 -- | Evaluate sequence of python statements. It uses python's @exec@.
@@ -109,11 +115,16 @@ pyf = QuasiQuoter
   , quoteDec  = error "quoteDec"
   }
 
--- | Create quote of python code suitable for use with
---   'Python.Inline.Eval.exec', 'Python.Inline.Eval.eval',
---   'Python.Inline.Eval.evalPyFunction'.
+-- $PyQuote
 --
---   It creates value of type 'Python.Inline.Eval.PyQuote'.
+-- 'PyQuote' wraps python code and bould haskell variables. It could
+-- be evaluated using 'Python.Inline.Eval.exec',
+-- 'Python.Inline.Eval.eval', 'Python.Inline.Eval.evalPyFunction'.
+
+
+-- | Create quote of python code. It captures haskell variables in the
+--   same way as rest of quasiquotes and creates value of type
+--   'Python.Inline.Eval.PyQuote'.
 --
 --   @since 0.2@
 pycode :: QuasiQuoter
@@ -137,3 +148,15 @@ pyfun = QuasiQuoter
   , quoteType = error "quoteType"
   , quoteDec  = error "quoteDec"
   }
+
+-- | Create value of type 'PyQuote' from file. Created quote doesn't
+--   capture any variables.
+--
+--   @since 0.3
+pySource :: FilePath -> TH.Q TH.Exp
+pySource path = do
+  TH.addDependentFile path
+  [| PyQuote { code   = $(TH.lift =<< TH.runIO (codeFromString <$> readFile path))
+             , binder = mempty
+             } |]
+
