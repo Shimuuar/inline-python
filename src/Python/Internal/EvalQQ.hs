@@ -88,8 +88,7 @@ expQQ :: Mode   -- ^ Python evaluation mode: @exec@/@eval@
       -> TH.Q TH.Exp
 expQQ mode qq_src = do
   -- We need to preprocess before passing it to python.
-  let src     = prepareSource       mode qq_src
-      src_var = prepareForVarLookup mode src
+  let src = prepareSource mode qq_src
   antis  <- liftIO $ do
     -- We've embedded script into library and we need to pass source
     -- code of QQ to a script. It can contain whatever symbols so to
@@ -105,7 +104,7 @@ expQQ mode qq_src = do
                 , "decode_and_print('" <>
                   concat [ [ intToDigit $ fromIntegral (w `shiftR` 4)
                            , intToDigit $ fromIntegral (w .&. 15) ]
-                         | w <- BS.unpack $ T.encodeUtf8 $ T.pack src_var
+                         | w <- BS.unpack $ T.encodeUtf8 $ T.pack src
                          ]
                   <> "')"
                 ]
@@ -139,12 +138,6 @@ prepareSource = \case
   Eval -> dropWhile isSpace
   Exec -> unindent
   Fun  -> unindent
-
-prepareForVarLookup :: Mode -> String -> String
-prepareForVarLookup = \case
-  Eval -> id
-  Exec -> id
-  Fun  -> ("def __dummy__():\n"++) . indent
 
 prepareForEval :: Mode -> [String] -> String -> String
 prepareForEval mode vars src = case mode of
