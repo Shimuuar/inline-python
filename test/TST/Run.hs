@@ -8,6 +8,7 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Map.Strict        qualified as Map
+import Data.Text              qualified as T
 import Test.Tasty
 import Test.Tasty.HUnit
 import Python.Inline
@@ -190,6 +191,12 @@ testEvalExec = testGroup "eval/exec"
       let n = 2 :: Int
       x <- fromPy =<< evalPyFunction Temp [pyfun| return 100 * n_hs |]
       liftIO $ Just (200::Int) @=? x
+  , testCase "createModule" $ runPy $ do
+      m <- createModule (T.pack "foo") [pycode||]
+      [py_|
+        import types
+        assert isinstance(m_hs, types.ModuleType)
+        |]
   ]
 
 testAsync :: TestTree
