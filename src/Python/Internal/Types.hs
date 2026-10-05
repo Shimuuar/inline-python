@@ -20,6 +20,7 @@ module Python.Internal.Types
   , pyIO
     -- ** Python code wrappers
   , PyQuote(..)
+  , PyQuoteFun(..)
   , Code(..)
   , codeFromText
   , codeFromString
@@ -142,6 +143,18 @@ newtype PyThreadId = PyThreadId Word64
 --
 --   @since 0.2@
 data PyQuote = PyQuote
+  { code   :: !Code
+  , binder :: !DictBinder
+  }
+
+
+-- | Quasiquoted body of python function which could be used by
+--   'Python.Inline.Eval.evalPyFunction'. Function body must be
+--   wrapped in @_inline_python_@ function which quasiquoter
+--   'Python.Inline.QQ.pyfun' does automatically.
+--
+--   @since 0.3@
+data PyQuoteFun = PyQuoteFun
   { code   :: !Code
   , binder :: !DictBinder
   }

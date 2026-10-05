@@ -10,6 +10,7 @@ module Python.Inline.Eval
   , evalPyFunction
     -- * Source code
   , PyQuote(..)
+  , PyQuoteFun(..)
   , Code
   , codeFromText
   , codeFromString

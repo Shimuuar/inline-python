@@ -186,6 +186,10 @@ testEvalExec = testGroup "eval/exec"
         assert m_hs.a == 12
         assert m_hs.b == 'asd'
         |]
+  , testCase "evalPyFunction" $ runPy $ do
+      let n = 2 :: Int
+      x <- fromPy =<< evalPyFunction Temp [pyfun| return 100 * n_hs |]
+      liftIO $ Just (200::Int) @=? x
   ]
 
 testAsync :: TestTree

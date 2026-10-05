@@ -1104,10 +1104,10 @@ exec globals locals q = runProgram $ do
 -- @since 0.3
 evalPyFunction
   :: Namespace global
-  => global  -- ^ Global variables
-  -> PyQuote -- ^ Source code
+  => global     -- ^ Global variables
+  -> PyQuoteFun -- ^ Source code
   -> Py PyObject
-evalPyFunction globals (PyQuote code binder) = runProgram $ do
+evalPyFunction globals (PyQuoteFun code binder) = runProgram $ do
   p_locals <- takeOwnership =<< progPy basicNewDict
   p_kwargs <- takeOwnership =<< progPy basicNewDict
   progPy $ do
