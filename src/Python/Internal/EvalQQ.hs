@@ -116,9 +116,10 @@ expQQ mode qq_src = do
              ]
       src_eval = prepareForEval mode antis src
   --
-  [| PyQuote ($(TH.lift $ codeFromString src_eval))
-             (mconcat $(TH.listE args))
-   |]
+  case mode of
+    Eval -> [| PyQuote    ($(TH.lift $ codeFromString src_eval)) (mconcat $(TH.listE args)) |]
+    Exec -> [| PyQuote    ($(TH.lift $ codeFromString src_eval)) (mconcat $(TH.listE args)) |]
+    Fun  -> [| PyQuoteFun ($(TH.lift $ codeFromString src_eval)) (mconcat $(TH.listE args)) |]
 
 
 antiSuffix :: String

@@ -188,7 +188,7 @@ testEvalExec = testGroup "eval/exec"
         |]
   , testCase "evalPyFunction" $ runPy $ do
       let n = 2 :: Int
-      x <- fromPy =<< evalPyFunction Temp [pycode| return 100 * n_hs |]
+      x <- fromPy =<< evalPyFunction Temp [pyfun| return 100 * n_hs |]
       liftIO $ Just (200::Int) @=? x
   ]
 

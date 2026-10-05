@@ -9,6 +9,7 @@ module Python.Inline.Monad.QQ
   , pye
   , pyf
   , pycode
+  , pyfun
   ) where
 
 
@@ -17,7 +18,7 @@ import Language.Haskell.TH.Quote
 import Python.Internal.EvalQQ
 import Python.Internal.Eval
 import Python.Inline.Monad
-import Python.Inline.QQ (pycode)
+import Python.Inline.QQ (pycode,pyfun)
 
 
 
