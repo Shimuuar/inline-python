@@ -20,7 +20,18 @@ tests :: TestTree
 tests = testGroup "Run python"
   [ testCase "Empty QQ" $ runPy [py_| |]
   , testCase "Second init is noop" $ initializePython
-  , testCase "Nested runPy" $ runPy $ liftIO $ runPy $ pure ()
+  , testRunPy
+  , testScope
+  , testEvalExec
+  , testMonadic
+  , testAsync
+  ]
+
+-- Test that python evaluation works in general and its interaction
+-- with exceptions
+testRunPy :: TestTree
+testRunPy = testGroup "Running python"
+  [ testCase "Nested runPy" $ runPy $ liftIO $ runPy $ pure ()
   , testCase "Nested runPyInMain" $ runPyInMain $ liftIO $ runPyInMain $ pure ()
   , testCase "runPyInMain" $ runPyInMain $ [py_|
       import threading
@@ -44,7 +55,12 @@ tests = testGroup "Run python"
         $ do liftIO $ putMVar lock ()
              liftIO $ threadDelay 10_000_000
              error "Should be interrupted"
-  , testCase "Scope pymain->any" $ runPy $ do
+  ]
+
+-- Test that different quasiquotes correctly handle scoping
+testScope :: TestTree
+testScope = testGroup "Python scope"
+  [ testCase "Scope pymain->any" $ runPy $ do
       [pymain|
              x = 12
              x
@@ -135,7 +151,11 @@ tests = testGroup "Run python"
         except NameError:
             pass
         |]
-  , testCase "pyf works" $ do
+  ]
+
+testEvalExec :: TestTree
+testEvalExec = testGroup "eval/exec"
+  [ testCase "pyf works" $ do
       let x = 12 :: Int
       eq (Just (482412::Int)) [pyf|
          xs = [i*x_hs for i in [1, 200, 40000]]
@@ -166,78 +186,84 @@ tests = testGroup "Run python"
         assert m_hs.a == 12
         assert m_hs.b == 'asd'
         |]
-  , testGroup "async" $ guardThreaded
-    [ -- We can run async computation at all
-      testCase "runPyAsync" $ do
-        runPy [pymain| dct = {} |]
-        a <- runPyAsync $ [py_| dct[1] = 100 |]
-        _ <- atomically $ waitPy a
-        n <- runPy $ fromPy =<< [pye| dct[1] |]
-        assertEqual "x" (Just (100::Int)) n
-        runPy [pymain| del dct |]
-    , -- Cancellation of python code
-      testCase "cancelPy [python]" $ do
-        a <- runPyAsync $ forever $ [py_|
-          import time
-          while True:
-              time.sleep(1e-3)
-          |]
-        d <- registerDelay 100_000
-        threadDelay 100 -- Wait to make sure execution actually started
-        cancelPy a
-        _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
-                                                      True  -> error "Timeout"
-                                                      False -> retry
-        return ()
-    , -- Cancellation of haskell code
-      testCase "cancelPy [haskell]" $ do
-        a <- runPyAsync $ do
-          liftIO $ forever $ threadDelay 1_000_000
-        d <- registerDelay 100_000
-        threadDelay 100
-        cancelPy a
-        _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
-                                                      True  -> error "Timeout"
-                                                      False -> retry
-        return ()
-    , -- Cancellation of haskell code
-      testCase "cancelPy [callback]" $ do
-        a <- runPyAsync $ do
-          let loop = forever $ threadDelay 1_000_000 :: IO ()
-          forever [py_| loop_hs() |]
-        d <- registerDelay 100_000
-        threadDelay 100
-        _ <- forkIO $ cancelPy a
-        _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
-                                                      True  -> error "Timeout"
-                                                      False -> retry
-        return ()
-    , testCase "Exception in runPyInMain works py" $ do
-        lock <- newEmptyMVar
-        tid  <- myThreadId
-        _    <- forkIO $ takeMVar lock >> threadDelay 1000 >> throwTo tid Stop
-        handle (\Stop -> pure ())
-          $ runPyInMain
-          $ do liftIO $ putMVar lock ()
-               [py_|
-                 import time
-                 while True:
-                     time.sleep(1e-3)
-                 |]
-               error "Should be interrupted"
-    ]
-    -- Here we only test that quasiquotes produce correct code
-  , testGroup "Monadic"
-    [ testCase "pymain" $ runPy [pymain| assert True |]
-    , testCase "py_"    $ runPy [py_|    assert True |]
-    , testCase "pye" $ runPy $ do
-        n <- fromPy =<< [pye| 42 |]
-        liftIO $ Just (42::Int) @=? n
-    , testCase "pyf" $ runPy $ do
-        n <- fromPy =<< [pyf| return 42 |]
-        liftIO $ Just (42::Int) @=? n
-    ]
   ]
+
+testAsync :: TestTree
+testAsync = testGroup "async" $ guardThreaded
+  [ -- We can run async computation at all
+    testCase "runPyAsync" $ do
+      runPy [pymain| dct = {} |]
+      a <- runPyAsync $ [py_| dct[1] = 100 |]
+      _ <- atomically $ waitPy a
+      n <- runPy $ fromPy =<< [pye| dct[1] |]
+      assertEqual "x" (Just (100::Int)) n
+      runPy [pymain| del dct |]
+  , -- Cancellation of python code
+    testCase "cancelPy [python]" $ do
+      a <- runPyAsync $ forever $ [py_|
+        import time
+        while True:
+            time.sleep(1e-3)
+        |]
+      d <- registerDelay 100_000
+      threadDelay 100 -- Wait to make sure execution actually started
+      cancelPy a
+      _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
+                                                    True  -> error "Timeout"
+                                                    False -> retry
+      return ()
+  , -- Cancellation of haskell code
+    testCase "cancelPy [haskell]" $ do
+      a <- runPyAsync $ do
+        liftIO $ forever $ threadDelay 1_000_000
+      d <- registerDelay 100_000
+      threadDelay 100
+      cancelPy a
+      _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
+                                                    True  -> error "Timeout"
+                                                    False -> retry
+      return ()
+  , -- Cancellation of haskell code
+    testCase "cancelPy [callback]" $ do
+      a <- runPyAsync $ do
+        let loop = forever $ threadDelay 1_000_000 :: IO ()
+        forever [py_| loop_hs() |]
+      d <- registerDelay 100_000
+      threadDelay 100
+      _ <- forkIO $ cancelPy a
+      _ <- atomically $ waitPyCatch a `orElse` do readTVar d >>= \case
+                                                    True  -> error "Timeout"
+                                                    False -> retry
+      return ()
+  , testCase "Exception in runPyInMain works py" $ do
+      lock <- newEmptyMVar
+      tid  <- myThreadId
+      _    <- forkIO $ takeMVar lock >> threadDelay 1000 >> throwTo tid Stop
+      handle (\Stop -> pure ())
+        $ runPyInMain
+        $ do liftIO $ putMVar lock ()
+             [py_|
+               import time
+               while True:
+                   time.sleep(1e-3)
+               |]
+             error "Should be interrupted"
+  ]
+
+
+-- Here we only test that quasiquotes produce correct code
+testMonadic :: TestTree
+testMonadic = testGroup "Monadic"
+  [ testCase "pymain" $ runPy [pymain| assert True |]
+  , testCase "py_"    $ runPy [py_|    assert True |]
+  , testCase "pye" $ runPy $ do
+      n <- fromPy =<< [pye| 42 |]
+      liftIO $ Just (42::Int) @=? n
+  , testCase "pyf" $ runPy $ do
+      n <- fromPy =<< [pyf| return 42 |]
+      liftIO $ Just (42::Int) @=? n
+  ]
+
 
 data Stop = Stop
   deriving stock    Show
