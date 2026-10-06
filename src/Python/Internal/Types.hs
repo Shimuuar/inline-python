@@ -42,6 +42,8 @@ import Data.Coerce
 import Data.Int
 import Data.Word
 import Data.ByteString             qualified as BS
+import Data.ByteString.Lazy        qualified as BL
+import Data.ByteString.Builder     qualified as BB
 import Data.Map.Strict             qualified as Map
 import Data.Text                   qualified as T
 import Data.Text.Encoding          qualified as T
@@ -171,7 +173,13 @@ newtype Code = Code BS.ByteString
 --
 --   @since 0.2@
 codeFromText :: T.Text -> Code
-codeFromText = Code . T.encodeUtf8
+-- NOTE: We consume code with BS.useAsCString and python C API expect
+--       NULL-terminated string. We have to add terminator manually
+codeFromText code
+  = Code
+  $ BL.toStrict
+  $ BB.toLazyByteString
+  $ T.encodeUtf8Builder code <> BB.word8 0
 
 -- | Create properly encoded @Code@. This function doesn't check
 --   syntactic validity.

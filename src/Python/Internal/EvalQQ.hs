@@ -8,7 +8,6 @@ module Python.Internal.EvalQQ
   ) where
 
 import Control.Monad.IO.Class
-import Control.Monad.Catch
 import Data.Bits
 import Data.Char
 import Data.List                 (intercalate)
@@ -29,7 +28,6 @@ import Language.Haskell.TH.Syntax qualified as TH
 import Python.Internal.Types
 import Python.Internal.Program
 import Python.Internal.Eval
-import Python.Internal.CAPI
 import Python.Inline.Literal
 
 
@@ -39,12 +37,16 @@ C.include "<inline-python.h>"
 ----------------------------------------------------------------
 
 -- | Python's variable name encoded using UTF-8. It exists in order to
---   avoid working with @String@ at runtime.
+--   avoid working with @String@ at runtime. Bytestring should be NULL
+--   terminated manually
 newtype PyVarName = PyVarName BS.ByteString
   deriving stock (Show, TH.Lift)
 
+-- | PyVarName is being consumed using 'BS.unsafeUseAsCString' which
+--   doesn't NULL terminate underlying buffer and python's C API
+--   require it. We have to add terminator ourselves
 varName :: String -> PyVarName
-varName = PyVarName . T.encodeUtf8 . T.pack
+varName nm = PyVarName $ flip BS.snoc 0 $ T.encodeUtf8 (T.pack nm)
 
 unsafeWithPyVarName :: PyVarName -> Program r (Ptr CChar)
 unsafeWithPyVarName (PyVarName bs)
