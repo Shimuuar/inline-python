@@ -24,7 +24,7 @@ module Python.Inline.Eval
   , Module(..)
   ) where
 
-import Data.ByteString.Unsafe     qualified as BS
+import Data.ByteString            qualified as BS
 import Data.Text                  (Text)
 import Data.Text.Encoding         qualified as T
 import Language.C.Inline          qualified as C
@@ -48,7 +48,7 @@ bindVar
   -> a    -- ^ Variable value
   -> DictBinder
 bindVar name a = DictBinder $ \p_dict -> runProgram $ do
-  p_key <- progIOBracket $ BS.unsafeUseAsCString (T.encodeUtf8 name)
+  p_key <- progIOBracket $ BS.useAsCString (T.encodeUtf8 name)
   p_obj <- takeOwnership =<< progPy (throwOnNULL =<< basicToPy a)
   progPy $ do
     r <- Py [CU.block| int {
