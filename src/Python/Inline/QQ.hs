@@ -156,7 +156,8 @@ pyfun = QuasiQuoter
 pySource :: FilePath -> TH.Q TH.Exp
 pySource path = do
   TH.addDependentFile path
-  [| PyQuote { code   = $(TH.lift =<< TH.runIO (codeFromString <$> readFile path))
-             , binder = mempty
-             } |]
+  [| PyQuote
+     ($(TH.lift =<< TH.runIO (codeFromString <$> readFile path)))
+     mempty
+   |]
 
