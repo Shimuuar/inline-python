@@ -252,8 +252,8 @@ void inline_py_clear_error(void) {
         locals  = PyDict_New();
         code    = Py_CompileString("None", "<interactive>", Py_eval_input);
     }
-    PyObject* r = PyEval_EvalCode(code, globals, locals);
     // None is immortal. No need to decrement counter
+    PyEval_EvalCode(code, globals, locals);
     PyErr_Clear();
 }
 
