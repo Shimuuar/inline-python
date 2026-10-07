@@ -17,8 +17,16 @@
   flag is set. Default behavior is unchanged.
 * Haskell exception raised in haskell callback will be rethrown if not caught by
   python instead of being converted to `PyError`.
-* Memory leak in exception handling is fixed. Python exception object were never
-  freed when exception propagated to haskell side.
+* `evalPyFunction` is added to company of `eval` and `exec`. It uses new
+  `PyQuoteFun` data type as parameter.
+* `pySource` quasiquoter added. It loads python code from file. 
+* `createModule` added which gives standard way of defining python code.
+* Bug fixes:
+ - Memory leak in exception handling is fixed. Python exception object were never
+   freed when exception propagated to haskell side.
+ - `bindVar` and `codeFromString`, `codeFromText` violated memory safety but
+   happened to work correctly when strings were created by TH. Consider upgrade
+   if using them.
 
 0.2.1.0 [2026.01.13]
 ----------------
