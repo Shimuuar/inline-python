@@ -50,7 +50,7 @@ Library
         Py.Extra
 
 executable mpl-gui-test
-  buildable: false
+  buildable: False
   --
   Default-Language: GHC2021
   main-is:          test.hs

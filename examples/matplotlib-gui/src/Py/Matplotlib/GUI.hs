@@ -25,7 +25,6 @@ import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Data.Typeable
 import Data.Function
-import Language.Haskell.TH.Syntax qualified as TH
 
 import Python.Inline
 import Python.Inline.QQ
