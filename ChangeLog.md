@@ -1,4 +1,4 @@
-0.3.0.0 [XXXX.XX.XX]
+0.3.0.0 [2026.10.15]
 --------------------
 * Support for asynchronous execution added in module `Python.Inline.Async`.  It
   uses API modelled after `async` package. Such computations could be
